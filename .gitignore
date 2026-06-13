@@ -11,6 +11,7 @@ journal/
 positions.jsonl
 proposals/
 reviews/
+signals/
 
 # Kill switch — local-only, intentional
 KILL_SWITCH

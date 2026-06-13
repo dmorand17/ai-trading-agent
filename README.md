@@ -88,6 +88,23 @@ FINNHUB_API_KEY=...                                  # optional: politician fall
 4. **`mode.toml` and `watchlist.json`** present and valid at repo root.
 5. **`.gitignore`** that excludes `.env`, `trade-log.jsonl`, `journal/`, `positions.jsonl`.
 
+## Standalone signal scanner
+
+For dry-runs and validating the methodology without involving Claude, run the standalone Form 4 scanner:
+
+```bash
+export SEC_USER_AGENT="Your Name your@email.com"   # required by SEC fair-access policy
+python3 scripts/scan_form4.py                       # default: 100 most recent filings
+python3 scripts/scan_form4.py --count 100 -v        # verbose: print every XML fetch
+python3 scripts/scan_form4.py --no-write            # stdout only
+```
+
+Output: stdout summary + `signals/form4-{YYYY-MM-DD}.json` with the structured cluster data. Stdlib only — no `pip install`. Read-only — does **not** call the Robinhood MCP or touch the trade log.
+
+The scanner implements Signal B's cluster definition (`references/insider-signal.md` §3) and scoring (§4): ≥2 distinct insiders, weighted count ≥ 4.0, ≥ $100K aggregate, code P only. Use it to (a) sanity-check the SOP's daily output against the same data, and (b) backfill historical days via the EDGAR daily-index (v2 — not yet implemented).
+
+Expected baseline: **most days produce zero qualifying clusters.** Form 4 activity is dominated by routine compensation (codes A, M, F); a real cluster of open-market buys is rare and informative.
+
 ## Running the SOP interactively
 
 From a Claude Code session **with this repo as the working directory**:
