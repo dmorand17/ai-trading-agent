@@ -1,6 +1,6 @@
 ---
 name: weekly-review
-description: Weekly review phase of the AI Trading Agent SOP. Read the week's journals and trade log, compute P&L / win-rate by strategy, capture lessons, and suggest tuning for the strategy knobs. Writes WEEKLY-REVIEW.md. Use for "/weekly-review", "weekly recap", "how did the week go", or a scheduled Friday trigger. Always sends one summary message.
+description: Weekly review phase of the AI Trading Agent SOP. Read the week's journals and trade log, compute P&L / win-rate by strategy and theme, capture lessons, and suggest tuning for the strategy knobs. Writes journal/{YYYY-MM-DD}-weekly-review.md. Use for "/weekly-review", "weekly recap", "how did the week go", or a scheduled Friday trigger. Always sends one summary message.
 ---
 
 # Weekly review — Phase 4: Recap & lessons
@@ -35,14 +35,10 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
 4. **Tuning suggestions** — concrete, optional knob changes for `references/strategy.md` §A.4
    (e.g. raise a `min_score_to_trade`, adjust `volume_confirm_mult` or `rsi_oversold`).
    **Suggest only** — never edit `strategy.md` or `config.toml` here; the user decides.
-5. **Write `WEEKLY-REVIEW.md`** at repo root (append a new dated `## Week of {YYYY-MM-DD}`
-   section; do not overwrite prior weeks). Sections: Summary · P&L by Strategy · P&L by Theme ·
-   vs SPY Benchmark · Exit Reasons · Open Positions Carried (by theme) · Lessons · Tuning
-   Suggestions.
-
-> Note: `WEEKLY-REVIEW.md` is a new artifact this phase introduces. If you want it kept out of
-> git, add it to `.gitignore` (the runtime-artifacts block) — flag this to the user the first
-> time it's written.
+5. **Write `journal/{YYYY-MM-DD}-weekly-review.md`** where the date is the Friday of the week
+   being reviewed. Create a new file each week (never append to prior weeks' files). Sections:
+   Summary · P&L by Strategy · P&L by Theme · vs SPY Benchmark · Exit Reasons · Open Positions
+   Carried (by theme) · Lessons · Tuning Suggestions.
 
 ## Notification policy: always send one message
 
@@ -56,4 +52,4 @@ if missing, emit as the final session line instead.
 ## Report back (the one weekly message, ≤6 lines)
 
 Week range · realized P&L (total + best/worst strategy) · win rate · trades count · vs SPY ·
-path to `WEEKLY-REVIEW.md`.
+path to `journal/{YYYY-MM-DD}-weekly-review.md`.

@@ -28,9 +28,9 @@ Code session is the executor at runtime. `CLAUDE.md` is the always-loaded dispat
 ├── KILL_SWITCH                       ← (create to halt new orders; delete to resume)
 ├── trade-log.jsonl                   ← Append-only audit log (single analytics source)
 ├── positions.jsonl                   ← Trailing-stop state (peak_mark per open position)
-├── WEEKLY-REVIEW.md                  ← Appended each Friday by the weekly-review skill
 ├── journal/
-│   └── YYYY-MM-DD.md                 ← One markdown journal per trading day
+│   ├── YYYY-MM-DD.md                 ← Daily journal (one per trading day)
+│   └── YYYY-MM-DD-weekly-review.md   ← Weekly review (written each Friday)
 ├── scripts/
 │   └── notify.sh                     ← ntfy push notifications
 ├── references/
