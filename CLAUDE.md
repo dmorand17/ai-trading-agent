@@ -32,7 +32,7 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 
 1. **Never invest more than 15% of total portfolio value in a single position.** Universal cap
    — no per-symbol overrides.
-2. **Prefer limit orders; use market orders only when fractional shares are required.** Entry logic: if `floor(tier_$  / ask) ≥ 1`, place a limit order at `ask × 1.002` for whole shares. If `floor(tier_$ / ask) < 1` (stock too expensive for even 1 whole share at tier sizing), place a `dollar_amount` market order during `regular_hours` only. Exits always use limit orders at `bid × 0.998` — never market for exits.
+2. **Prefer limit orders; use market orders only when fractional shares are required.** Entry logic: if `floor(tier_$ / ask) ≥ 1`, place a limit order at `min(ask × 1.002, SMA10 × 1.01)` for whole shares. If `floor(tier_$ / ask) < 1` (stock too expensive for even 1 whole share at tier sizing), place a `dollar_amount` market order during `regular_hours` only. Exits always use limit orders at `bid × 0.998` — never market for exits.
 3. **A tiered trailing stop protects every open position from day 1.** Track each position's
    `peak_mark` (max of entry and every mark observed since); close immediately when the
    current mark falls below `peak_mark × (1 − band)`. The band tightens as gain grows:

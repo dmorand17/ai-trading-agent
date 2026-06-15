@@ -81,10 +81,11 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
 
 - [ ] **§0.1 Position cap.** `(qty × limit_price + existing position in ticker) / total_equity ≤
   0.15` — the universal 15% per-position cap. No per-symbol overrides.
-- [ ] **§0.2 Order type.** For entries: either (a) `limit_price` is set and within 0.2% of ask
-  (`limit_price ≈ ask × 1.002`, reject if `> ask × 1.005`), or (b) `dollar_amount` is set and
-  `limit_price` is null (market+fractional path — acceptable when `floor(dollar_amount/ask) < 1`).
-  Reject if both are null, or if `dollar_amount` is set on an exit.
+- [ ] **§0.2 Order type.** For entries: either (a) `limit_price` is set and equals
+  `min(ask×1.002, SMA10×1.01)` — reject if `limit_price > ask × 1.005`; or (b) `dollar_amount`
+  is set and `limit_price` is null (market+fractional path, acceptable when
+  `floor(dollar_amount/ask) < 1`). Reject if both are null, or if `dollar_amount` is set on
+  an exit.
 - [ ] **§0.3 Trailing-stop math.** `q5_max_loss_usd ≈ dollar_amount × 0.12` (for fractional
   market entries) or `qty × limit_price × 0.12` (for limit entries). If wildly off, reject.
 - [ ] **§0.4 Journal exists.** `journal/{today}.md` exists.

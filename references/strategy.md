@@ -32,7 +32,7 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 
 | Condition | Order type | Parameters |
 | --- | --- | --- |
-| `floor(tier_$ / ask) ≥ 1` — whole share fits | `type=limit` | `qty=floor(tier_$/ask)`, `limit_price=ask×1.002`, `time_in_force=gfd` |
+| `floor(tier_$ / ask) ≥ 1` — whole share fits | `type=limit` | `qty=floor(tier_$/ask)`, `limit_price=min(ask×1.002, SMA10×1.01)`, `time_in_force=gfd` |
 | `floor(tier_$ / ask) < 1` — stock too expensive | `type=market` | `dollar_amount=tier_$`, `market_hours=regular_hours` |
 
 **Exits — always limit, no exceptions:**
@@ -40,6 +40,11 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 - Never `stop_market`, never `market-on-close`, never market for exits.
 
 **Spread filter:** skip any entry (limit or market) when `(ask − bid) / mid > 50 bps`.
+
+**SMA10 for limit pricing:** compute the 10-day SMA of closing prices from the same OHLCV data
+used for strategy scoring. If the resulting `limit_price` is below the current bid (i.e.
+`SMA10 × 1.01 < bid`), the order will likely not fill today — log it as a day order and
+re-evaluate next session if unfilled.
 
 ### 0.3 Trailing stop: tiered band, close without waiting
 
