@@ -40,8 +40,10 @@ This is the **execution phase** of the AI Trading Agent SOP. Read the project `C
 Message only when an order is placed (paper or live) or an exit fires. Include ticker(s), side,
 qty, limit, mode. No trade → stay silent.
 
-When a trade or exit fires, send one notification via `scripts/notify.sh`. Read `.env` first to
-confirm `NTFY_TOKEN` is set; if missing, emit as the final session line instead.
+When a trade or exit fires, send one notification via `scripts/notify.sh`. The script reads
+`NTFY_TOKEN` from the environment — set either as a routine/shell env var (cloud) or in `.env`
+(local; source it first with `set -a; . ./.env; set +a` if the file exists). Only if `NTFY_TOKEN`
+is unset in the environment, emit as the final session line instead.
 
 ```bash
 # order placed

@@ -58,8 +58,10 @@ Always run these four in order; the rest builds on them.
 its §0.3 trailing band and will need action at the open, OR a stop condition is live (`CLAUDE.md`
 stop conditions). Otherwise stay silent.
 
-When urgent, send one notification via `scripts/notify.sh`. Read `.env` first to confirm
-`NTFY_TOKEN` is set; if missing, emit the message as the final session line instead.
+When urgent, send one notification via `scripts/notify.sh`. The script reads `NTFY_TOKEN` from
+the environment — set either as a routine/shell env var (cloud) or in `.env` (local; source it
+first with `set -a; . ./.env; set +a` if the file exists). Only if `NTFY_TOKEN` is unset in the
+environment, emit the message as the final session line instead.
 
 ```bash
 # urgent — candidate or stop condition

@@ -33,8 +33,11 @@ session is the right hour to lock in gains before overnight risk.
 
 ## Notification policy: always send one message
 
-Send exactly **one** summary message every trading day, including no-trade days. Read `.env`
-first to confirm `NTFY_TOKEN` is set; if missing, emit as the final session line instead.
+Send exactly **one** summary message every trading day, including no-trade days, via
+`scripts/notify.sh`. The script reads `NTFY_TOKEN` from the environment — set either as a
+routine/shell env var (cloud) or in `.env` (local; source it first with `set -a; . ./.env; set
++a` if the file exists). Only if `NTFY_TOKEN` is unset in the environment, emit as the final
+session line instead.
 
 ```bash
 ./scripts/notify.sh -t "daily-summary" -p 3 -T "bar_chart" "<EOD recap ≤6 lines>"

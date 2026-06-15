@@ -42,8 +42,10 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
 
 ## Notification policy: always send one message
 
-Send exactly **one** weekly summary message. Read `.env` first to confirm `NTFY_TOKEN` is set;
-if missing, emit as the final session line instead.
+Send exactly **one** weekly summary message via `scripts/notify.sh`. The script reads
+`NTFY_TOKEN` from the environment — set either as a routine/shell env var (cloud) or in `.env`
+(local; source it first with `set -a; . ./.env; set +a` if the file exists). Only if `NTFY_TOKEN`
+is unset in the environment, emit as the final session line instead.
 
 ```bash
 ./scripts/notify.sh -t "weekly-review" -p 3 -T "calendar" "<weekly recap ≤6 lines>"
