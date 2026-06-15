@@ -17,8 +17,13 @@ shape every prompt below:
    runs unless each routine **commits and pushes its `journal/` + `trade-log.jsonl` (+
    `positions.jsonl`, `themes.toml`) changes back to the default branch.** So:
    - Enable **Permissions → Allow unrestricted branch pushes** for this repo on every routine
-     that writes (all four), so they can push to `main` instead of only `claude/*`.
-   - Every prompt ends with a commit + push step.
+     that writes (all four), so they can push to `main` instead of only `claude/*`. **This toggle
+     is required** — without it the run physically cannot push to `main`, so it falls back to
+     pushing a `claude/*` branch and opening a pull request (which leaves the state stranded off
+     `main`, and the next phase reads stale data). Set it in the routine's **Edit → Permissions**
+     tab; the CLI/`/schedule` cannot.
+   - Every prompt ends with a commit + push step that pushes **directly to `main`** (`git push
+     origin HEAD:main`) and explicitly says NOT to open a PR.
 2. **The Robinhood MCP must be a claude.ai connector.** A server you added locally with
    `claude mcp add` does **not** transfer to the cloud. Add Robinhood as a connector at
    [claude.ai/customize/connectors](https://claude.ai/customize/connectors), or declare it in a
@@ -81,7 +86,9 @@ cloud session. There is no human to confirm anything.
 4. Follow the skill's "silent unless urgent" notification policy.
 5. FINALLY, persist state so the market-open phase can read it: stage journal/ (and any updated
    themes.toml), commit with message "pre-market {YYYY-MM-DD}: drafted N trade ideas", and push
-   to the default branch. If nothing changed, say so and skip the commit.
+   the commit DIRECTLY to the default branch (main) — `git push origin HEAD:main`. Do NOT open a
+   pull request and do NOT push to a claude/* branch; this state must land on main so the
+   market-open phase reads it. If nothing changed, say so and skip the commit.
 
 Report back in <=5 lines: account snapshot, top catalysts, the 2-3 ideas, any urgent flag, and
 the journal path.
@@ -127,8 +134,9 @@ risk-reviewer subagent is the pre-trade gate.
    Executed and Positions Closed tables in today's journal.
 4. Follow the skill's "message only if a trade is placed" notification policy.
 5. FINALLY, persist state: stage trade-log.jsonl, positions.jsonl, proposals/, reviews/, and
-   journal/, commit with message "market-open {YYYY-MM-DD}: placed N orders [mode]", and push to
-   the default branch. If nothing changed, say so and skip the commit.
+   journal/, commit with message "market-open {YYYY-MM-DD}: placed N orders [mode]", and push the
+   commit DIRECTLY to the default branch (main) — `git push origin HEAD:main`. Do NOT open a pull
+   request and do NOT push to a claude/* branch. If nothing changed, say so and skip the commit.
 
 Report back in <=5 lines: orders placed (count + mode), positions touched incl. trailing-stop
 exits, stop conditions hit, and the trade-log.jsonl + journal paths.
@@ -163,7 +171,9 @@ session.
    Executed / Positions Closed tables are complete ("None today." if empty).
 3. Follow the skill's notification policy: ALWAYS send exactly one summary message.
 4. FINALLY, persist state: stage journal/, trade-log.jsonl, and positions.jsonl, commit with
-   message "daily-summary {YYYY-MM-DD}", and push to the default branch.
+   message "daily-summary {YYYY-MM-DD}", and push the commit DIRECTLY to the default branch
+   (main) — `git push origin HEAD:main`. Do NOT open a pull request and do NOT push to a
+   claude/* branch.
 
 Report back as the one daily message (<=6 lines): date + mode, EOD equity + cash, open positions
 count, trades today, positions closed + realized P&L, and the journal path.
@@ -199,7 +209,9 @@ trade-log.jsonl or prior daily journals (append an Addendum rather than editing 
    a prior week's.
 3. Follow the skill's notification policy: ALWAYS send exactly one summary message.
 4. FINALLY, persist state: stage the new journal/{YYYY-MM-DD}-weekly-review.md, commit with
-   message "weekly-review {YYYY-MM-DD}", and push to the default branch.
+   message "weekly-review {YYYY-MM-DD}", and push the commit DIRECTLY to the default branch
+   (main) — `git push origin HEAD:main`. Do NOT open a pull request and do NOT push to a
+   claude/* branch.
 
 Report back as the one weekly message (<=6 lines): week range, realized P&L (total + best/worst
 strategy), win rate, trades count, vs SPY, and the weekly-review file path.
