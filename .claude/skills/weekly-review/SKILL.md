@@ -22,9 +22,11 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
    `exit_reason`):
    - Total realized P&L for the week and per **strategy** (`signal_source`: trend / breakout /
      rsi_revert and confluence combos).
+   - Total realized P&L per **theme** (`theme` field; look up `themes.toml` for any entries
+     missing the field). Rank themes best → worst for the week.
    - Win rate (closed sells with `realized_pnl_usd > 0` ÷ total closed).
    - Exit-reason breakdown (trailing_stop / time_stop / manual).
-   - Open positions carried into next week + unrealized P&L.
+   - Open positions carried into next week + unrealized P&L (grouped by theme).
    - **Benchmark check:** compare the week's net return (realized + unrealized) against SPY over
      the same window — the goal is to beat the S&P 500 (`CLAUDE.md`).
    - jq recipes are in `strategy.md` §7.1.
@@ -34,8 +36,9 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
    (e.g. raise a `min_score_to_trade`, adjust `volume_confirm_mult` or `rsi_oversold`).
    **Suggest only** — never edit `strategy.md` or `config.toml` here; the user decides.
 5. **Write `WEEKLY-REVIEW.md`** at repo root (append a new dated `## Week of {YYYY-MM-DD}`
-   section; do not overwrite prior weeks). Sections: Summary · P&L by Strategy · vs SPY
-   Benchmark · Exit Reasons · Open Positions Carried · Lessons · Tuning Suggestions.
+   section; do not overwrite prior weeks). Sections: Summary · P&L by Strategy · P&L by Theme ·
+   vs SPY Benchmark · Exit Reasons · Open Positions Carried (by theme) · Lessons · Tuning
+   Suggestions.
 
 > Note: `WEEKLY-REVIEW.md` is a new artifact this phase introduces. If you want it kept out of
 > git, add it to `.gitignore` (the runtime-artifacts block) — flag this to the user the first

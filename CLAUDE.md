@@ -105,8 +105,17 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 | Strategies, sizing, exits, mode, kill switch, log schemas | `references/strategy.md` |
 | When/how to spawn the risk-reviewer subagent | `references/risk-review.md` |
 | Robinhood MCP tool reference (signatures, defaults, gotchas) | `references/robinhood-mcp.md` |
+| Ticker → theme mapping for trade-log tagging and P&L analytics | `themes.toml` |
 
 Do not preload references unless the loop needs them.
+
+## Watchlist maintenance
+
+Whenever the Agent WatchList is modified (tickers added or removed via `add_to_watchlist` /
+`remove_from_watchlist`), **update `themes.toml` in the same operation** — before the
+conversation ends. `themes.toml` is the canonical source of ticker → theme metadata and must
+stay in sync with the Robinhood list. The `theme` field in every `trade-log.jsonl` entry is
+populated from `themes.toml`; stale mappings corrupt theme-level P&L analytics.
 
 ## Two logs, both mandatory
 

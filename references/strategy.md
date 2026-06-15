@@ -225,6 +225,25 @@ The trading universe lives on Robinhood; the cash reserve lives in `config.toml`
   cash. If a candidate buy would breach the floor, reduce `qty` to fit; never below the §3.1
   minimum.
 
+### 2.4 Investment themes
+
+The Agent WatchList is organized around five high-conviction secular themes. The canonical
+ticker list lives on Robinhood (display_name `"Agent WatchList"`); manage it there, not here.
+
+| Theme | Angle |
+| --- | --- |
+| **Nuclear** | Power operators, uranium supply chain, components and defense reactors |
+| **Robotics** | Surgical, industrial, collaborative, and software automation |
+| **Space** | Launch vehicles, satellite broadband, defense/anchor primes, lunar |
+| **AI** | GPU compute, chip architecture, enterprise analytics, AI networking |
+| **Data Centers / AI Infrastructure** | Colocation REITs, power and cooling, server hardware, GPU cloud |
+| **Cybersecurity** | Endpoint, network, and identity security protecting AI/data center infrastructure |
+| **Semiconductors** | Fab equipment, memory, advanced packaging — picks-and-shovels for all other themes |
+| **Quantum Computing** | Gate-based and annealing quantum hardware and software; early-stage, lower liquidity |
+| **Defense Tech** | Autonomous systems, drones, hypersonics, defense AI; geopolitical cycle beneficiary |
+| **Clean Energy** | Solar, wind, fuel cells, grid infrastructure powering data centers and electrification |
+| **Biotech / AI Drug Discovery** | Generative AI applied to drug pipelines, genomics, gene editing |
+
 ---
 
 ## 3. Position sizing & risk caps
@@ -353,6 +372,7 @@ One JSON object per line. Written **before** the MCP order tool fires.
   "limit_price": 42.25,
   "conviction_tier": "high",
   "conviction_score": 78,
+  "theme": "ai",
   "account_id_masked": "…XYZ",
   "mcp_tool_called": "robinhood.place_limit_order",
   "mcp_response": { "order_id": "abc-123", "status": "queued", "raw": "<full payload>" },
@@ -374,6 +394,7 @@ One JSON object per line. Written **before** the MCP order tool fires.
 | `limit_price` | yes | The limit sent to the MCP. |
 | `conviction_tier` | yes | `low` / `medium` / `high`. |
 | `conviction_score` | yes | 0–100 from §A. |
+| `theme` | yes | Theme key from `themes.toml` (e.g. `"ai"`, `"nuclear"`). Look up by ticker at log time. |
 | `account_id_masked` | yes | Last 4 chars of the Agentic account id. Never log the full id. |
 | `mcp_tool_called` | live only | Robinhood tool invoked. |
 | `mcp_response` | live only | Full structured response incl. broker order id. |
