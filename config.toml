@@ -1,4 +1,4 @@
-# AI Trading Agent SOP — execution mode
+# AI Trading Agent SOP — runtime configuration
 # Edit this file to control how the SOP behaves on every invocation.
 # Schema: references/strategy.md §1.1
 
@@ -20,6 +20,20 @@ block_tickers = []
 
 # Daily loss cap as a fraction of Agentic-account equity. Halts new entries on breach.
 daily_loss_cap_pct = 0.02
+
+# Minimum cash to hold as a fraction of Agentic-account equity. The SOP may never deploy past
+# (1 − cash_reserve_pct).
+cash_reserve_pct = 0.10
+
+# Name (display_name) of the Robinhood watchlist the SOP uses as its universe. The SOP pulls
+# this list fresh via the Robinhood MCP on every invocation. Edit the list in the Robinhood
+# app; the SOP picks up the change on its next run. Rename here if you rename the list there.
+sop_universe_list_name = "Agent WatchList"
+
+# true  = ignore the universe filter and score every ticker the SOP encounters. Paper-mode
+#         discovery only. Treat results as exploratory; do not promote to live.
+# false = enforce the universe filter (the named Robinhood list above).
+discovery_mode = false
 
 # Two-agent risk review (references/risk-review.md, .claude/agents/risk-reviewer.md).
 # true  = every candidate trade is reviewed by the risk-reviewer subagent before any MCP

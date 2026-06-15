@@ -18,8 +18,9 @@ This phase runs **before the open**, so the market is closed and **no order tool
 
 Always run these four in order; the rest builds on them.
 
-1. **Check the account** (`CLAUDE.md` preconditions). Confirm `mode.toml` and `watchlist.json`
-   parse and there's no `KILL_SWITCH`. Read the **Robinhood balance and open positions** from
+1. **Check the account** (`CLAUDE.md` preconditions). Confirm `config.toml` parses, the SOP
+   universe list (`config.toml::sop_universe_list_name`) is fetchable from Robinhood, and
+   there's no `KILL_SWITCH`. Read the **Robinhood balance and open positions** from
    the MCP: cash, total equity, every open position (ticker, qty, avg entry, current mark,
    unrealized P&L). If the MCP is unreachable, note it and continue with research only — this
    phase never orders. This snapshot anchors sizing and the goal check (beat the S&P 500).

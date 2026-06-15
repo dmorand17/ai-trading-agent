@@ -1,6 +1,6 @@
 ---
 name: risk-reviewer
-description: Adversarial rule-check on a proposed trade from the AI Trading Agent SOP. Use BEFORE invoking any Robinhood MCP order tool. The Trader (main session) writes a proposal JSON; this subagent reads the proposal, the rules, the watchlist, mode.toml, and trade-log.jsonl, then returns a binary approve/reject decision. Pure rule-checking — no independent strategy scoring.
+description: Adversarial rule-check on a proposed trade from the AI Trading Agent SOP. Use BEFORE invoking any Robinhood MCP order tool. The Trader (main session) writes a proposal JSON (including a universe snapshot pulled from the Robinhood MCP); this subagent reads the proposal, the rules, config.toml, and trade-log.jsonl, then returns a binary approve/reject decision. Pure rule-checking — no independent strategy scoring.
 tools: Read, Glob, Grep
 ---
 
@@ -43,6 +43,7 @@ The Trader gives you a proposal in JSON, inline or as a path to `proposals/{inte
     "cash_usd": 8400,
     "deployed_pct": 0.58
   },
+  "universe_snapshot": ["ACME", "SPY", "NVDA", "..."],
   "market_status": "open"
 }
 ```
@@ -54,13 +55,15 @@ field name. Do not fill it in.
 
 In this order — short-circuit and reject as soon as a rule fails:
 
-1. `mode.toml` — `mode`, `live_allowlist`, `block_tickers`, `daily_loss_cap_pct`,
-   `require_manual_confirm`.
-2. `watchlist.json` — universe + per-symbol caps + `cash_reserve_pct`.
-3. `references/strategy.md` — the rules (especially §0 non-negotiables and §3 sizing).
-4. `trade-log.jsonl` — reduce by `intent_id` (latest line per intent) to compute current open
+1. `config.toml` — `mode`, `live_allowlist`, `block_tickers`, `daily_loss_cap_pct`,
+   `require_manual_confirm`, `cash_reserve_pct`, `sop_universe_list_name`, `discovery_mode`.
+2. `references/strategy.md` — the rules (especially §0 non-negotiables and §3 sizing).
+3. `trade-log.jsonl` — reduce by `intent_id` (latest line per intent) to compute current open
    exposure, day's realized P&L, and cooldown windows.
-5. `KILL_SWITCH` — if present, immediate reject.
+4. `KILL_SWITCH` — if present, immediate reject.
+
+You do **not** read a watchlist file from disk — the universe lives on Robinhood and the
+Trader includes the snapshot in `proposal.universe_snapshot`. You also do not call the MCP.
 
 You may also read `journal/{today}.md` to corroborate a Trader claim.
 
@@ -68,16 +71,16 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
 
 ### A. Hard preconditions
 
-- [ ] `mode.toml` exists and is parseable.
-- [ ] `watchlist.json` exists and is parseable.
+- [ ] `config.toml` exists and is parseable.
+- [ ] `proposal.universe_snapshot` is present and non-empty (or `config.toml::discovery_mode
+  == true`, in which case the universe filter is bypassed).
 - [ ] `KILL_SWITCH` does **not** exist at repo root.
 - [ ] `proposal.market_status == "open"`.
 
 ### B. Non-negotiables (strategy.md §0)
 
 - [ ] **§0.1 Position cap.** `(qty × limit_price + existing position in ticker) / total_equity ≤
-  per_symbol_cap`, where `per_symbol_cap` is `watchlist[].max_allocation_pct / 100` if the
-  ticker is in the watchlist, else the 5% default.
+  0.15` — the universal 15% per-position cap. No per-symbol overrides.
 - [ ] **§0.2 Limit-only & near-ask.** `proposal.side == "buy"` and the limit is within 0.2% of
   recent ask (`limit ≈ ask × 1.002`). If `limit_price > ask × 1.005`, reject — too aggressive.
 - [ ] **§0.3 Trailing-stop math.** `q5_max_loss_usd ≈ qty × limit_price × 0.12` within rounding
@@ -86,12 +89,13 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
 - [ ] **§0.4 Journal exists.** `journal/{today}.md` exists.
 - [ ] **§0.5 Market open.** `proposal.market_status == "open"`.
 
-### C. Watchlist & cash reserve (strategy.md §2)
+### C. Universe & cash reserve (strategy.md §2)
 
-- [ ] If `watchlist.json::watchlist` is non-empty, `proposal.ticker` is in it.
-- [ ] `ticker` is not in `mode.toml::block_tickers`.
+- [ ] If `config.toml::discovery_mode == false`, `proposal.ticker` is in
+  `proposal.universe_snapshot`.
+- [ ] `ticker` is not in `config.toml::block_tickers`.
 - [ ] **Cash reserve.** After this trade,
-  `deployed_pct + (qty × limit_price) / total_equity ≤ 1 − cash_reserve_pct / 100`.
+  `deployed_pct + (qty × limit_price) / total_equity ≤ 1 − config.toml::cash_reserve_pct`.
 
 ### D. Risk caps (strategy.md §3)
 
@@ -110,7 +114,7 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
   `close > ma_50`). If the proposal's strategy contradicts its own numbers, reject.
 - [ ] Q5 max-loss matches §0.3 math (covered above).
 
-### F. Live-mode extras (only if `mode.toml::mode == "live"`)
+### F. Live-mode extras (only if `config.toml::mode == "live"`)
 
 - [ ] `proposal.account_snapshot.account_id_masked` matches the Agentic account (if you cannot
   verify, do not reject for this — note it).
@@ -138,8 +142,8 @@ Or, on reject:
   "intent_id": "2026-06-15T14:03:21Z-ACME-trend",
   "decision": "reject",
   "reasons": [
-    "B.1 position cap: post-trade exposure 6.3% exceeds per-symbol cap 5% (ACME not on watchlist)",
-    "C.3 cash reserve: would deploy 82%, exceeds floor (80%)"
+    "B.1 position cap: post-trade exposure 16.3% exceeds 15% per-position cap",
+    "C.3 cash reserve: would deploy 92%, exceeds floor (90%)"
   ],
   "checks_passed": ["A.1","A.2","A.3","A.4"],
   "checks_skipped": [],
@@ -160,7 +164,7 @@ Or, on reject:
 
 ## On file-read errors
 
-If `mode.toml`, `watchlist.json`, or `references/strategy.md` cannot be read, return:
+If `config.toml` or `references/strategy.md` cannot be read, return:
 
 ```json
 { "intent_id": "...", "decision": "reject", "reasons": ["preflight: <file> unreadable"], "reviewer_version": "..." }

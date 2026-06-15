@@ -1,6 +1,6 @@
 # Risk Review (Two-Agent Pattern)
 
-When `require_risk_review = true` in `mode.toml`, the Trader (main session following `CLAUDE.md`)
+When `require_risk_review = true` in `config.toml`, the Trader (main session following `CLAUDE.md`)
 **must** spawn the `risk-reviewer` subagent on every candidate trade and only invoke the
 Robinhood MCP order tool after an `approve` decision.
 
@@ -12,8 +12,8 @@ Trader-side workflow, the proposal/decision artifacts, and the failure modes.
 A single agent that both scores a strategy and places the order tends to confirm its own thesis.
 Two failure modes get caught by a second agent that didn't propose the trade:
 
-1. **Stale rule application.** The Trader was last told the cap was 5%; the user bumped a symbol
-   to 8% in `watchlist.json` an hour ago. The Reviewer reads the file fresh.
+1. **Stale rule application.** The Trader was last told `cash_reserve_pct` was 0.20; the user
+   changed it in `config.toml` an hour ago. The Reviewer reads the file fresh.
 2. **Bias under conviction.** A high score makes the Trader rationalize bending the 5-question
    framework. The Reviewer's prompt forces adversarial rule-checking.
 
@@ -27,8 +27,9 @@ Trader (main session, CLAUDE.md)
    │ scores the strategy set, applies the Decision Framework
    ├─► writes proposals/{intent_id}.json
    ├─► spawns risk-reviewer subagent with the proposal
-   │     Reviewer reads: mode.toml, watchlist.json, strategy.md,
+   │     Reviewer reads: config.toml, strategy.md,
    │       trade-log.jsonl, KILL_SWITCH, journal/today.md
+   │       (universe snapshot lives in the proposal — MCP-fetched by the Trader)
    │     Reviewer returns: {decision: approve|reject, reasons: [...]}
    ├─► writes reviews/{intent_id}.json
    ├─► if approve: append pending trade-log line → invoke MCP order tool → append final line
@@ -85,7 +86,7 @@ On reject, the Trader still writes one line to `trade-log.jsonl`:
   "conviction_score": 78,
   "result": "rejected_by_risk_review",
   "rejection_reasons": [
-    "B.1 position cap: post-trade exposure 6.3% exceeds per-symbol cap 5%"
+    "B.1 position cap: post-trade exposure 16.3% exceeds 15% per-position cap"
   ],
   "rules_version": "2026-06-15"
 }
@@ -93,7 +94,7 @@ On reject, the Trader still writes one line to `trade-log.jsonl`:
 
 ## 6. When to require review
 
-In `mode.toml`:
+In `config.toml`:
 
 ```toml
 require_risk_review = true   # default true once the feature is enabled
@@ -108,14 +109,15 @@ require_risk_review = true   # default true once the feature is enabled
 
 ```
 You are the risk-reviewer subagent. Review the following trade proposal against
-references/strategy.md §0, watchlist.json, and trade-log.jsonl. Return a single JSON decision
+references/strategy.md §0, config.toml, and trade-log.jsonl. Return a single JSON decision
 object per .claude/agents/risk-reviewer.md.
 
 Proposal:
 {INLINE_PROPOSAL_JSON or path to proposals/{intent_id}.json}
 
-Read mode.toml, watchlist.json, references/strategy.md, trade-log.jsonl, and check for
-KILL_SWITCH. Use the checklist in your system prompt. No prose, JSON only.
+Read config.toml, references/strategy.md, trade-log.jsonl, and check for KILL_SWITCH. The
+universe snapshot (the Robinhood watchlist symbols at proposal time) is included in the
+proposal as `universe_snapshot`. Use the checklist in your system prompt. No prose, JSON only.
 ```
 
 ## 8. Failure modes & escalations

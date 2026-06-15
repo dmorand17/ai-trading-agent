@@ -30,8 +30,8 @@ phase-specific entry points that all defer to this file and `references/strategy
 Bright-line invariants. If any conflicts with a strategy score, the rule wins. Full mechanics in
 `references/strategy.md` §0.
 
-1. **Never invest more than 5% of total portfolio value in a single position** (overridable
-   per-symbol via `watchlist.json`).
+1. **Never invest more than 15% of total portfolio value in a single position.** Universal cap
+   — no per-symbol overrides.
 2. **Never place a market order.** Limit orders only, within 0.2% of the current ask.
 3. **A tiered trailing stop protects every open position from day 1.** Track each position's
    `peak_mark` (max of entry and every mark observed since); close immediately when the
@@ -51,11 +51,12 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 2. **Account is the dedicated Agentic account** — not the user's primary individual account.
    Robinhood only permits agentic trading from dedicated Agentic accounts.
 3. **Market is open.** If closed, signal scans continue but no order tool may be invoked.
-4. **`mode.toml` exists and parses.** Required: `mode`, `live_allowlist`,
+4. **`config.toml` exists and parses.** Required: `mode`, `live_allowlist`,
    `require_manual_confirm`. If missing, create with paper defaults and tell the user.
-5. **`watchlist.json` exists and parses.** Required: `watchlist` (array, `[]` allowed) and
-   `cash_reserve_pct`. Each entry needs `symbol`, `description`, `max_allocation_pct`. If
-   missing, halt and tell the user.
+5. **SOP universe is reachable.** Pull the Robinhood watchlist named in
+   `config.toml::sop_universe_list_name` via the MCP (`get_watchlists` → match by `display_name`
+   → `get_watchlist_items`). If the named list does not exist, halt and tell the user. If
+   `discovery_mode = true`, skip this check (no universe filter).
 6. **No kill switch.** If `KILL_SWITCH` exists at repo root, refuse to place orders (scans still
    allowed).
 7. **`trade-log.jsonl` is writable.** No order tool may be invoked unless it is.
@@ -63,7 +64,9 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 ## Daily SOP loop
 
 ```
-1. Refresh quotes/OHLCV for each watchlist ticker (Robinhood MCP; web/quote fallback).
+1. Pull the SOP universe (Robinhood list named in `config.toml::sop_universe_list_name`) via the
+   MCP; filter to equity instruments. Refresh quotes/OHLCV for each (Robinhood MCP; web/quote
+   fallback).
 2. Score each ticker against the three strategies (references/strategy.md §A:
    trend-following, momentum/breakout, RSI mean-reversion). A ticker that fires ≥1 becomes a
    candidate; tier = best firing score, with the §5 confluence upgrade if ≥2 fire.
@@ -83,9 +86,9 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 ## Decision Framework (answer all 5 in writing before every trade)
 
 1. **Current cash balance?** Read from the MCP. The trade must fit available cash and respect
-   `cash_reserve_pct` from `watchlist.json`.
-2. **What positions are already open?** Read from the MCP. Block if this ticker is at its
-   per-symbol cap, or not in a populated watchlist.
+   `cash_reserve_pct` from `config.toml`.
+2. **What positions are already open?** Read from the MCP. Block if this ticker is at the 15%
+   per-position cap, or not in the SOP universe (unless `discovery_mode = true`).
 3. **Recent news?** Quick read (MCP or brief web search). Block on an active going-private,
    bankruptcy, fraud, SEC enforcement, or accounting-restatement headline in the last 14 days.
 4. **What do the moving averages / RSI say?** This is also the strategy input — confirm the
@@ -124,8 +127,8 @@ Do not preload references unless the loop needs them.
 ## Stop conditions
 
 Halt new entries and tell the user when: the market is closed; the daily loss cap is breached;
-the MCP goes unreachable mid-loop; `KILL_SWITCH` appears; or `mode.toml`/`watchlist.json`
-becomes unparseable.
+the MCP goes unreachable mid-loop; `KILL_SWITCH` appears; `config.toml` becomes unparseable; or
+the SOP universe list cannot be fetched from Robinhood.
 
 ## Reporting back
 

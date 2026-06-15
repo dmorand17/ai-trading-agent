@@ -32,7 +32,7 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
    in the daily reflections.
 4. **Tuning suggestions** — concrete, optional knob changes for `references/strategy.md` §A.4
    (e.g. raise a `min_score_to_trade`, adjust `volume_confirm_mult` or `rsi_oversold`).
-   **Suggest only** — never edit `strategy.md` or `mode.toml` here; the user decides.
+   **Suggest only** — never edit `strategy.md` or `config.toml` here; the user decides.
 5. **Write `WEEKLY-REVIEW.md`** at repo root (append a new dated `## Week of {YYYY-MM-DD}`
    section; do not overwrite prior weeks). Sections: Summary · P&L by Strategy · vs SPY
    Benchmark · Exit Reasons · Open Positions Carried · Lessons · Tuning Suggestions.

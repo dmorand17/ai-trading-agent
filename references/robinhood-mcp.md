@@ -38,8 +38,8 @@ Does **not** return reliable buying power — route buying-power questions throu
 ### `get_equity_positions`
 - **args:** `account_number`, `cursor?`
 - Open equity positions for one account: symbol, quantity, average cost, per-position
-  hold breakdowns. Used by the SOP loop for the §0.3 trailing-stop sweep and per-symbol cap
-  check.
+  hold breakdowns. Used by the SOP loop for the §0.3 trailing-stop sweep and §0.1 15%
+  per-position cap check.
 
 ## Market data
 

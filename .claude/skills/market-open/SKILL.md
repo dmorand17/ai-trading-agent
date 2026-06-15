@@ -14,8 +14,9 @@ This is the **execution phase** of the AI Trading Agent SOP. Read the project `C
 ## Do this
 
 1. **All hard preconditions** (`CLAUDE.md`) — MCP connected, account is the **Agentic** account,
-   market **open**, `mode.toml`/`watchlist.json` valid, no `KILL_SWITCH`, `trade-log.jsonl`
-   writable. Halt with a written reason on any failure; do not trade on a partial check.
+   market **open**, `config.toml` valid, the SOP universe list fetchable from Robinhood, no
+   `KILL_SWITCH`, `trade-log.jsonl` writable. Halt with a written reason on any failure; do
+   not trade on a partial check.
 2. **Load drafted candidates** from today's journal Market Research / Draft Trade Ideas block
    (written by the `pre-market` phase). If the journal has no drafts (pre-market didn't run),
    score the watchlist now per `CLAUDE.md` loop steps 1–2 (`strategy.md` §A).

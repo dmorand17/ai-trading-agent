@@ -5,9 +5,9 @@ mandatory log schemas.** This file replaces the old signal-by-signal split — t
 now come from a small set of classic, price-based strategies (§A), not from external cluster
 feeds.
 
-Everything here is tunable **except §0**. `mode.toml` and `watchlist.json` are the runtime
-sources of truth for execution mode and the trading universe; this file is the source of truth
-for strategy and sizing.
+Everything here is tunable **except §0**. `config.toml` is the runtime source of truth for
+execution mode, cash reserve, and the universe-list pointer; the trading universe itself lives
+on Robinhood (pulled via the MCP). This file is the source of truth for strategy and sizing.
 
 ---
 
@@ -15,15 +15,15 @@ for strategy and sizing.
 
 If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 
-### 0.1 Position cap: 5% per single position (overridable per-symbol via watchlist)
+### 0.1 Position cap: 15% per single position
 
-- **Default cap: 5% of total portfolio value per single ticker.** Exposure =
-  `(open_qty × current_mark) / total_equity`. Includes pre-existing holdings.
-- **Per-symbol override:** if the ticker is in `watchlist.json` with `max_allocation_pct`, that
-  value **replaces** the 5% default for that ticker.
-- **Cash reserve interacts:** even with a higher per-symbol cap, total deployed capital still
-  respects `cash_reserve_pct` (§2.3) — you cannot push cash below the reserve floor.
-- The invariant: there is *always* an enforced per-position cap and a cash-reserve floor. The
+- **Universal cap: 15% of total portfolio value per single ticker.** Exposure =
+  `(open_qty × current_mark) / total_equity`. Includes pre-existing holdings. No per-symbol
+  overrides.
+- **Cash reserve interacts:** total deployed capital still respects `cash_reserve_pct` (§2.3) —
+  you cannot push cash below the reserve floor, even if the per-position cap would otherwise
+  allow it.
+- The invariant: a per-position cap of 15% and a cash-reserve floor are *always* enforced. The
   SOP may never trade past them.
 
 ### 0.2 Order type: limit only, within 0.2% of ask
@@ -154,18 +154,21 @@ rsi_period         = 14
 
 ## 1. Mode handling (paper → live transition)
 
-The SOP reads `mode.toml` at repo root **on every invocation, before any order tool is
+The SOP reads `config.toml` at repo root **on every invocation, before any order tool is
 touched.** If the file is missing, create it with paper defaults and report to the user.
 
-### 1.1 `mode.toml` schema
+### 1.1 `config.toml` schema
 
 ```toml
-mode = "paper"                  # "paper" | "live"
-live_allowlist = []             # [] = all eligible in live; ["AAPL"] = only AAPL goes live
-require_manual_confirm = true   # pause for explicit "yes" before each live order
-block_tickers = []              # global blocklist, overrides everything
-daily_loss_cap_pct = 0.02       # halt new entries when day P&L ≤ −this × equity
-require_risk_review = true       # spawn the risk-reviewer subagent before each order
+mode = "paper"                              # "paper" | "live"
+live_allowlist = []                         # [] = all eligible in live; ["AAPL"] = only AAPL goes live
+require_manual_confirm = true               # pause for explicit "yes" before each live order
+block_tickers = []                          # global blocklist, overrides everything
+daily_loss_cap_pct = 0.02                   # halt new entries when day P&L ≤ −this × equity
+cash_reserve_pct = 0.10                     # minimum cash floor as a fraction of equity
+sop_universe_list_name = "Agent WatchList"  # Robinhood watchlist used as the universe (display_name)
+discovery_mode = false                      # true = ignore the universe filter (paper-mode discovery)
+require_risk_review = true                  # spawn the risk-reviewer subagent before each order
 ```
 
 ### 1.2 Paper mode (default)
@@ -186,58 +189,41 @@ wait for explicit `yes`.
 
 Paper ≥ 30 trading days → live + manual-confirm + 1–3 allowlisted tickers ≥ 2 weeks → widen
 allowlist → open allowlist → finally `require_manual_confirm = false`. Rollback is always: edit
-`mode.toml`, save, next invocation honors it.
+`config.toml`, save, next invocation honors it.
 
 ---
 
-## 2. Watchlist & cash reserve (`watchlist.json`)
+## 2. Universe & cash reserve
 
-Required config at repo root, read on every invocation. The SOP **never** writes to it.
+The trading universe lives on Robinhood; the cash reserve lives in `config.toml`.
 
-### 2.1 Schema
+### 2.1 Universe source
 
-```json
-{
-  "watchlist": [
-    { "symbol": "SPY", "description": "S&P 500 ETF — baseline market exposure", "max_allocation_pct": 15 }
-  ],
-  "cash_reserve_pct": 20
-}
-```
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `watchlist` | yes | Permitted symbols. Empty array = no symbol restriction. |
-| `watchlist[].symbol` | yes | Uppercase US-listed ticker. |
-| `watchlist[].description` | yes | Free text; surfaced in the journal so future-you remembers the thesis. |
-| `watchlist[].max_allocation_pct` | yes | Per-symbol cap as % of equity (0–100). Replaces the 5% default in §0.1. |
-| `cash_reserve_pct` | yes | Minimum cash to hold as % of equity. The SOP may never deploy past `(100 − cash_reserve_pct)%`. |
+- The SOP universe is the Robinhood watchlist whose `display_name` equals
+  `config.toml::sop_universe_list_name`. The SOP pulls it fresh each invocation via
+  `get_watchlists` (match by name → resolve to `list_id`) and `get_watchlist_items`.
+- **Filter to equity only.** Drop items whose `object_type ≠ "instrument"` (crypto pairs,
+  indexes, futures). The SOP only trades US-listed common equity.
+- The SOP **never writes** to the Robinhood watchlist. Add/remove names via the Robinhood app
+  (or `add_to_watchlist` / `remove_from_watchlist` only with explicit user confirmation in chat).
+- If the named list cannot be found, halt (precondition #5 in `CLAUDE.md`) and tell the user.
 
 ### 2.2 Universe filter
 
-- **Populated watchlist:** no order for an off-watchlist ticker. Off-watchlist names that score
-  are still logged in Market Research with `Decision: Skipped — not on watchlist`. Recommended
-  for live.
-- **Empty watchlist (`[]`):** no symbol restriction. Useful for paper-mode discovery.
+- **Default (`discovery_mode = false`):** no order for a ticker outside the universe.
+  Off-universe names that score are still logged in Market Research with
+  `Decision: Skipped — not on universe list`.
+- **`discovery_mode = true`:** no universe filter. Score whatever the SOP encounters. Paper
+  mode only — do not flip this on in live.
 
 ### 2.3 Cash reserve
 
+- Source: `config.toml::cash_reserve_pct` (fraction of equity, e.g. `0.10`).
 - Compute `deployed_pct = (total_equity − cash_balance) / total_equity` each loop.
-- A new buy may not push `deployed_pct` above `(100 − cash_reserve_pct) / 100`.
-- Example: `equity = $20,000`, `cash_reserve_pct = 20` → deploy ≤ $16,000, keep ≥ $4,000 cash.
-  If a candidate buy would breach the floor, reduce `qty` to fit; never below the §3.1 minimum.
-
-### 2.4 Per-symbol cap precedence
-
-1. `watchlist[].max_allocation_pct` if the symbol is in the watchlist, else
-2. the 5% default from §0.1.
-
-Some cap is **always** enforced. The SOP may never compute "no cap applies."
-
-### 2.5 Watchlist edits
-
-The SOP never writes `watchlist.json`. If a strong candidate is off-watchlist, log it and
-suggest the edit in the End-of-Day Reflection — the user decides.
+- A new buy may not push `deployed_pct` above `1 − cash_reserve_pct`.
+- Example: `equity = $20,000`, `cash_reserve_pct = 0.10` → deploy ≤ $18,000, keep ≥ $2,000
+  cash. If a candidate buy would breach the floor, reduce `qty` to fit; never below the §3.1
+  minimum.
 
 ---
 
@@ -255,13 +241,13 @@ Driven by the conviction tier from §A scoring.
 | high | 80–100 | 2.0% |
 
 `qty = floor((equity × tier_pct) / limit_price)`, then **clamp downward** to satisfy the
-per-symbol cap (§2.4) and the cash-reserve floor (§2.3). If clamping drops `qty` below 1 share,
-skip and log `Decision: Skipped — sizing collapsed to zero (reserve or per-symbol cap)`.
+§0.1 15% per-position cap and the §2.3 cash-reserve floor. If clamping drops `qty` below 1
+share, skip and log `Decision: Skipped — sizing collapsed to zero (reserve or position cap)`.
 
 ### 3.2 Hard caps
 
-- **Per-ticker:** total exposure ≤ the §2.4 cap. A new buy may not push past.
-- **Cash-reserve floor:** total deployed ≤ `(1 − cash_reserve_pct / 100) × equity` (§2.3).
+- **Per-ticker:** total exposure ≤ 15% of equity (§0.1). A new buy may not push past.
+- **Cash-reserve floor:** total deployed ≤ `(1 − cash_reserve_pct) × equity` (§2.3).
 - **Daily loss cap:** if realized + unrealized day P&L ≤ `−daily_loss_cap_pct × equity` (default
   −2%), halt new entries for 24h. Existing positions and their exits keep running.
 
@@ -469,10 +455,11 @@ scans still write the journal. Delete the file to re-enable; log the event.
 
 ## 9. Stop conditions (SOP-level halts)
 
-Halt the loop and report to the user when: `mode.toml` or `watchlist.json` is missing or
-unparseable; Robinhood MCP `tools/list` fails twice in a row; the connected account is not the
-Agentic account; `trade-log.jsonl` is unwritable; the daily loss cap was breached < 24h ago; US
-regular session is closed (signal scans still run; ordering halts per §0.5).
+Halt the loop and report to the user when: `config.toml` is missing or unparseable; the SOP
+universe list cannot be fetched from Robinhood (named list not found, or the watchlist call
+fails twice in a row); Robinhood MCP `tools/list` fails twice in a row; the connected account
+is not the Agentic account; `trade-log.jsonl` is unwritable; the daily loss cap was breached
+< 24h ago; US regular session is closed (signal scans still run; ordering halts per §0.5).
 
 ---
 
