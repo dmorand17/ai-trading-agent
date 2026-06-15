@@ -26,12 +26,20 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 - The invariant: a per-position cap of 15% and a cash-reserve floor are *always* enforced. The
   SOP may never trade past them.
 
-### 0.2 Order type: limit only, within 0.2% of ask
+### 0.2 Order types: prefer limit; market only for fractional entries
 
-- Never `market`. Never `stop_market`. Never `market-on-close`.
-- Entry limit = `current_ask × 1.002`. Exit limit = `current_bid × 0.998`.
-- If the spread is so wide that `current_ask × 1.002` is still inside the spread, skip the
-  trade — the book is too thin.
+**Entries — choose based on whether a whole share fits:**
+
+| Condition | Order type | Parameters |
+| --- | --- | --- |
+| `floor(tier_$ / ask) ≥ 1` — whole share fits | `type=limit` | `qty=floor(tier_$/ask)`, `limit_price=ask×1.002`, `time_in_force=gfd` |
+| `floor(tier_$ / ask) < 1` — stock too expensive | `type=market` | `dollar_amount=tier_$`, `market_hours=regular_hours` |
+
+**Exits — always limit, no exceptions:**
+- `type=limit` at `current_bid × 0.998`, `time_in_force=gfd`.
+- Never `stop_market`, never `market-on-close`, never market for exits.
+
+**Spread filter:** skip any entry (limit or market) when `(ask − bid) / mid > 50 bps`.
 
 ### 0.3 Trailing stop: tiered band, close without waiting
 
@@ -255,13 +263,17 @@ Driven by the conviction tier from §A scoring.
 | Tier | Score | Position size (% of equity) |
 | --- | --- | --- |
 | skip | < min_score_to_trade | 0% (no trade) |
-| low | min–64 | 0.5% |
-| medium | 65–79 | 1.0% |
-| high | 80–100 | 2.0% |
+| low | min–64 | 5% |
+| medium | 65–79 | 8% |
+| high | 80–100 | 12% |
 
-`qty = floor((equity × tier_pct) / limit_price)`, then **clamp downward** to satisfy the
-§0.1 15% per-position cap and the §2.3 cash-reserve floor. If clamping drops `qty` below 1
-share, skip and log `Decision: Skipped — sizing collapsed to zero (reserve or position cap)`.
+`dollar_amount = equity × tier_pct`, then **clamp downward** so that:
+- `dollar_amount / total_equity + existing_exposure_pct ≤ 0.15` (§0.1 position cap)
+- `deployed_pct + dollar_amount / total_equity ≤ 1 − cash_reserve_pct` (§2.3 floor)
+
+For whole-share entries: `qty = floor(dollar_amount / ask)`. If `qty ≥ 1`, use limit order.
+If `qty < 1`, use market+dollar_amount (fractional). If `dollar_amount < $1.00` after clamping,
+skip and log `Decision: Skipped — sizing collapsed below $1 (reserve or position cap)`.
 
 ### 3.2 Hard caps
 
@@ -269,6 +281,7 @@ share, skip and log `Decision: Skipped — sizing collapsed to zero (reserve or 
 - **Cash-reserve floor:** total deployed ≤ `(1 − cash_reserve_pct) × equity` (§2.3).
 - **Daily loss cap:** if realized + unrealized day P&L ≤ `−daily_loss_cap_pct × equity` (default
   −2%), halt new entries for 24h. Existing positions and their exits keep running.
+- **Minimum order size:** $1.00. Below this, skip — Robinhood rejects sub-dollar fractional orders.
 
 ### 3.3 Liquidity floor
 
@@ -280,9 +293,9 @@ Skip any ticker with 20-day average daily dollar volume < $5M.
 
 ### 4.1 Entry
 
-- **Limit only**, `last_quote × 1.002` (20 bps slippage budget).
-- **Spread filter:** skip when `(ask − bid) / mid` exceeds **50 bps**.
-- **Time-in-force:** day order. Re-evaluate next session if not filled.
+- Apply the §0.2 order-type decision: limit for whole shares, market+dollar_amount for fractional.
+- **Spread filter:** skip when `(ask − bid) / mid > 50 bps` — applies to both order types.
+- For fractional market fills, record `qty` post-fill from the MCP response (up to 6 decimals).
 - **One entry per signal:** do not split into child orders.
 
 ### 4.2 Exits (this is how positions close — strategies never produce sells)
@@ -336,7 +349,7 @@ take `max(tiers) = medium`, upgrade once → **high**.
 For each candidate that survives all gates:
 
 1. Compose the pre-trade review block:
-   `ticker=ACME strategy=trend+breakout score=78 tier=high qty=120 limit=42.25 max_loss=$507 account=Agentic-…XYZ`
+   `ticker=ACME strategy=trend+breakout score=78 tier=high dollar_amount=$24.00 max_loss=$2.88 account=Agentic-…XYZ`
 2. **If `require_risk_review = true`:** write `proposals/{intent_id}.json`, spawn the
    `risk-reviewer` subagent, wait for its JSON decision, write `reviews/{intent_id}.json`. On
    `reject`, skip steps 3–5: append one `trade-log.jsonl` line with
@@ -368,8 +381,9 @@ One JSON object per line. Written **before** the MCP order tool fires.
   "signal_source": "trend+breakout",
   "ticker": "ACME",
   "side": "buy",
-  "qty": 120,
-  "limit_price": 42.25,
+  "dollar_amount": 24.00,
+  "qty": 0.057423,
+  "limit_price": null,
   "conviction_tier": "high",
   "conviction_score": 78,
   "theme": "ai",
@@ -390,8 +404,9 @@ One JSON object per line. Written **before** the MCP order tool fires.
 | `signal_source` | yes | Firing strategy or `+`-joined combo, e.g. `"trend"`, `"breakout"`, `"trend+rsi_revert"`. |
 | `ticker` | yes | Uppercase US-listed symbol. |
 | `side` | yes | `"buy"` for entries; `"sell"` for exits. |
-| `qty` | yes | Whole shares. |
-| `limit_price` | yes | The limit sent to the MCP. |
+| `dollar_amount` | entries | Set when using market+fractional (§0.2); null for limit entries and exits. |
+| `qty` | yes | Whole or fractional shares (up to 6 decimals). For market entries, populated post-fill from MCP response. |
+| `limit_price` | exits + limit entries | The limit sent to the MCP; null for market entries. |
 | `conviction_tier` | yes | `low` / `medium` / `high`. |
 | `conviction_score` | yes | 0–100 from §A. |
 | `theme` | yes | Theme key from `themes.toml` (e.g. `"ai"`, `"nuclear"`). Look up by ticker at log time. |

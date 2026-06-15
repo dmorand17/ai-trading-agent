@@ -204,9 +204,11 @@ Returns `list_id` values for `follow_watchlist`.
 
 ## Tools NOT to use
 
-- **Market orders** — SOP non-negotiable #2 forbids them. `type=market` and
-  `dollar_amount` paths are off-limits for the daily loop. Limit only, within 0.2%
-  of the ask.
+- **Market orders for exits** — always use `type=limit` at `bid × 0.998` for trailing-stop
+  and time-stop closes. Market exits are forbidden.
+- **Market orders for entries when a whole share fits** — if `floor(tier_$ / ask) ≥ 1`,
+  use `type=limit`. Market+`dollar_amount` is only for fractional entries where a whole
+  share would exceed the tier dollar amount.
 - **Extended hours** — SOP forbids extended-hours orders. Keep `market_hours` at
   `regular_hours` (the default).
 - **Options & crypto write tools** — out of scope for the current SOP (US-listed

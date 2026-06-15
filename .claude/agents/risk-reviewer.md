@@ -81,11 +81,12 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
 
 - [ ] **§0.1 Position cap.** `(qty × limit_price + existing position in ticker) / total_equity ≤
   0.15` — the universal 15% per-position cap. No per-symbol overrides.
-- [ ] **§0.2 Limit-only & near-ask.** `proposal.side == "buy"` and the limit is within 0.2% of
-  recent ask (`limit ≈ ask × 1.002`). If `limit_price > ask × 1.005`, reject — too aggressive.
-- [ ] **§0.3 Trailing-stop math.** `q5_max_loss_usd ≈ qty × limit_price × 0.12` within rounding
-  (12% is the day-1 trailing band when `peak_mark = entry_price`). If wildly off, reject — the
-  Trader miscomputed risk.
+- [ ] **§0.2 Order type.** For entries: either (a) `limit_price` is set and within 0.2% of ask
+  (`limit_price ≈ ask × 1.002`, reject if `> ask × 1.005`), or (b) `dollar_amount` is set and
+  `limit_price` is null (market+fractional path — acceptable when `floor(dollar_amount/ask) < 1`).
+  Reject if both are null, or if `dollar_amount` is set on an exit.
+- [ ] **§0.3 Trailing-stop math.** `q5_max_loss_usd ≈ dollar_amount × 0.12` (for fractional
+  market entries) or `qty × limit_price × 0.12` (for limit entries). If wildly off, reject.
 - [ ] **§0.4 Journal exists.** `journal/{today}.md` exists.
 - [ ] **§0.5 Market open.** `proposal.market_status == "open"`.
 
@@ -95,7 +96,8 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
   `proposal.universe_snapshot`.
 - [ ] `ticker` is not in `config.toml::block_tickers`.
 - [ ] **Cash reserve.** After this trade,
-  `deployed_pct + (qty × limit_price) / total_equity ≤ 1 − config.toml::cash_reserve_pct`.
+  `deployed_pct + trade_value / total_equity ≤ 1 − config.toml::cash_reserve_pct`,
+  where `trade_value = dollar_amount` (fractional) or `qty × limit_price` (limit).
 
 ### D. Risk caps (strategy.md §3)
 
