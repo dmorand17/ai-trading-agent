@@ -1,0 +1,34 @@
+{
+  "intent_id": "2026-06-15T19:35:24Z-FTNT-trend",
+  "ticker": "FTNT",
+  "side": "buy",
+  "qty": null,
+  "dollar_amount": 63.00,
+  "limit_price": null,
+  "ask": 149.12,
+  "order_type": "market_fractional",
+  "order_note": "floor(63/149.12)=0 whole shares -> fractional market dollar_amount per strategy.md §0.2; regular_hours",
+  "signal_source": "trend",
+  "conviction_tier": "high",
+  "conviction_score": 90,
+  "score_note": "trend base 60 +15 (SMA20 rising vs 5d ago) +15 (within 4% of 52w high ~150.07); overextension check: live 149.105 is 8.50% above SMA20 137.42, under 12% threshold -> no penalty = 90.",
+  "decision_framework": {
+    "q1_cash_balance_usd": 483.00,
+    "q2_open_positions": [{"ticker": "AMD", "qty": 0.0767, "mark": 547.75, "value_usd": 42.00}],
+    "q3_recent_news": "No disqualifying headlines in last 14 days. Q2 FY26 earnings released 2026-05-07; next ~Aug 2026. 2025 class-action (Q2-2025 guidance) is >14 days old, not blocking. Iran deal neutral for cybersecurity.",
+    "q4_ma_20": 137.42,
+    "q4_ma_50": 110.00,
+    "q4_close": 149.105,
+    "q4_rsi_14": 63,
+    "q4_note": "trend fires: close 149.105 > SMA20 137.42 > SMA50 110. Read holds at execution time.",
+    "q5_max_loss_usd": 7.56
+  },
+  "account_snapshot": {
+    "account_id_masked": "9594",
+    "total_equity_usd": 525.00,
+    "cash_usd": 483.00,
+    "deployed_pct": 0.08
+  },
+  "universe_snapshot": ["SMR","APLD","ILMN","MRNA","CRSP","RXRX","BE","NEE","ENPH","FSLR","AXON","KTOS","NOC","RTX","RGTI","QBTS","IONQ","MRVL","MU","LRCX","AMAT","AVGO","FTNT","ZS","PANW","CRWD","GEV","SMCI","VRT","DLR","EQIX","ORCL","NBIS","CRWV","ANET","PLTR","ARM","AMD","NVDA","LUNR","LMT","ASTS","RKLB","PATH","ROK","TER","ISRG","BWXT","CCJ","VST","CEG"],
+  "market_status": "open"
+}

@@ -1,0 +1,34 @@
+{
+  "intent_id": "2026-06-15T19:35:24Z-ROK-trend",
+  "ticker": "ROK",
+  "side": "buy",
+  "qty": null,
+  "dollar_amount": 63.00,
+  "limit_price": null,
+  "ask": 467.13,
+  "order_type": "market_fractional",
+  "order_note": "floor(63/467.13)=0 whole shares -> fractional market dollar_amount per strategy.md §0.2; regular_hours",
+  "signal_source": "trend",
+  "conviction_tier": "high",
+  "conviction_score": 90,
+  "score_note": "trend base 60 +15 (SMA20 rising vs 5d ago) +15 (within 4% of 52w high ~468); overextension check: live 467.12 is 3.64% above SMA20 450.72, under 12% threshold -> no penalty = 90.",
+  "decision_framework": {
+    "q1_cash_balance_usd": 420.00,
+    "q2_open_positions": [{"ticker": "AMD", "qty": 0.0767, "mark": 547.75, "value_usd": 42.00}, {"ticker": "FTNT", "qty": 0.4225, "mark": 149.105, "value_usd": 63.00}],
+    "q3_recent_news": "No disqualifying headlines in last 14 days. Rockwell Automation (not Roku). Q2 FY26 earnings ~2026-05-07; next ~Jul/Aug 2026. Industrial Production (G.17) released 9:15 ET today, supportive of automation demand.",
+    "q4_ma_20": 450.72,
+    "q4_ma_50": 430.00,
+    "q4_close": 467.12,
+    "q4_rsi_14": 56,
+    "q4_note": "trend fires: close 467.12 > SMA20 450.72 > SMA50 430. Read holds at execution time.",
+    "q5_max_loss_usd": 7.56
+  },
+  "account_snapshot": {
+    "account_id_masked": "9594",
+    "total_equity_usd": 525.00,
+    "cash_usd": 420.00,
+    "deployed_pct": 0.20
+  },
+  "universe_snapshot": ["SMR","APLD","ILMN","MRNA","CRSP","RXRX","BE","NEE","ENPH","FSLR","AXON","KTOS","NOC","RTX","RGTI","QBTS","IONQ","MRVL","MU","LRCX","AMAT","AVGO","FTNT","ZS","PANW","CRWD","GEV","SMCI","VRT","DLR","EQIX","ORCL","NBIS","CRWV","ANET","PLTR","ARM","AMD","NVDA","LUNR","LMT","ASTS","RKLB","PATH","ROK","TER","ISRG","BWXT","CCJ","VST","CEG"],
+  "market_status": "open"
+}

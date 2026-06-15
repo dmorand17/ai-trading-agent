@@ -1,0 +1,34 @@
+{
+  "intent_id": "2026-06-15T19:35:24Z-AMD-trend",
+  "ticker": "AMD",
+  "side": "buy",
+  "qty": null,
+  "dollar_amount": 42.00,
+  "limit_price": null,
+  "ask": 547.81,
+  "order_type": "market_fractional",
+  "order_note": "floor(42/547.81)=0 whole shares -> fractional market dollar_amount per strategy.md §0.2; regular_hours",
+  "signal_source": "trend",
+  "conviction_tier": "medium",
+  "conviction_score": 70,
+  "score_note": "trend base 60 +15 (SMA20 rising vs 5d ago: 481.97 > 473.93) +15 (within 4% of 52w high) -20 (overextension: live 547.75 is 13.65% above SMA20 481.97, exceeds 12% threshold) = 70. Pre-market drafted high(90) at 544.72; intraday run pushed it past the 12% overextension line, downgraded to medium and sized at 8%.",
+  "decision_framework": {
+    "q1_cash_balance_usd": 525.00,
+    "q2_open_positions": [],
+    "q3_recent_news": "No disqualifying headlines (fraud, bankruptcy, SEC enforcement, going-private, accounting restatement) in last 14 days. US-Iran ceasefire announced today drove risk-on rotation into AI/semis; AMD +6.5% intraday. Next earnings ~Aug 4, 2026.",
+    "q4_ma_20": 481.97,
+    "q4_ma_50": 393.00,
+    "q4_close": 547.75,
+    "q4_rsi_14": 57,
+    "q4_note": "trend fires: close 547.75 > SMA20 481.97 > SMA50 393. Read holds at execution time.",
+    "q5_max_loss_usd": 5.04
+  },
+  "account_snapshot": {
+    "account_id_masked": "9594",
+    "total_equity_usd": 525.00,
+    "cash_usd": 525.00,
+    "deployed_pct": 0.00
+  },
+  "universe_snapshot": ["SMR","APLD","ILMN","MRNA","CRSP","RXRX","BE","NEE","ENPH","FSLR","AXON","KTOS","NOC","RTX","RGTI","QBTS","IONQ","MRVL","MU","LRCX","AMAT","AVGO","FTNT","ZS","PANW","CRWD","GEV","SMCI","VRT","DLR","EQIX","ORCL","NBIS","CRWV","ANET","PLTR","ARM","AMD","NVDA","LUNR","LMT","ASTS","RKLB","PATH","ROK","TER","ISRG","BWXT","CCJ","VST","CEG"],
+  "market_status": "open"
+}
