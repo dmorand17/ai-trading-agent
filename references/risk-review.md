@@ -102,8 +102,10 @@ require_risk_review = true   # default true once the feature is enabled
 
 - **`true` (recommended):** every candidate goes through the Reviewer regardless of mode — so
   the daily journal reflects what would have been blocked in live.
-- **`false`:** Trader skips the Reviewer. Use only during the very first paper-mode shakedown
-  before the Reviewer scaffolding is validated.
+- **`false`:** Trader skips the Reviewer. **Paper mode only** — use during the very first
+  shakedown before the Reviewer scaffolding is validated. **Mandatory `true` in live mode:** the
+  SOP is fully autonomous (no human-in-the-loop confirmation), so the Reviewer is the sole
+  pre-trade gate. Live mode halts and refuses to place orders if this is `false`.
 
 ## 7. Trader-side spawn prompt
 

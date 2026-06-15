@@ -55,8 +55,8 @@ field name. Do not fill it in.
 
 In this order — short-circuit and reject as soon as a rule fails:
 
-1. `config.toml` — `mode`, `live_allowlist`, `block_tickers`, `daily_loss_cap_pct`,
-   `require_manual_confirm`, `cash_reserve_pct`, `sop_universe_list_name`, `discovery_mode`.
+1. `config.toml` — `mode`, `block_tickers`, `daily_loss_cap_pct`, `cash_reserve_pct`,
+   `sop_universe_list_name`, `discovery_mode`, `require_risk_review`.
 2. `references/strategy.md` — the rules (especially §0 non-negotiables and §3 sizing).
 3. `trade-log.jsonl` — reduce by `intent_id` (latest line per intent) to compute current open
    exposure, day's realized P&L, and cooldown windows.
@@ -119,9 +119,11 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
 
 ### F. Live-mode extras (only if `config.toml::mode == "live"`)
 
+- [ ] `config.toml::require_risk_review == true`. Live mode is fully autonomous with no
+  human-in-the-loop confirmation, so the Reviewer is mandatory; if this is false, reject — the
+  Trader should never have reached you.
 - [ ] `proposal.account_snapshot.account_id_masked` matches the Agentic account (if you cannot
   verify, do not reject for this — note it).
-- [ ] Ticker is in `live_allowlist` (or `live_allowlist == []`).
 
 ## Decision output
 

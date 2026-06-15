@@ -174,14 +174,12 @@ touched.** If the file is missing, create it with paper defaults and report to t
 
 ```toml
 mode = "paper"                              # "paper" | "live"
-live_allowlist = []                         # [] = all eligible in live; ["AAPL"] = only AAPL goes live
-require_manual_confirm = true               # pause for explicit "yes" before each live order
 block_tickers = []                          # global blocklist, overrides everything
 daily_loss_cap_pct = 0.02                   # halt new entries when day P&L ≤ −this × equity
 cash_reserve_pct = 0.10                     # minimum cash floor as a fraction of equity
 sop_universe_list_name = "Agent WatchList"  # Robinhood watchlist used as the universe (display_name)
 discovery_mode = false                      # true = ignore the universe filter (paper-mode discovery)
-require_risk_review = true                  # spawn the risk-reviewer subagent before each order
+require_risk_review = true                  # risk-reviewer subagent gates every order; MANDATORY in live
 ```
 
 ### 1.2 Paper mode (default)
@@ -192,17 +190,21 @@ require_risk_review = true                  # spawn the risk-reviewer subagent b
 
 ### 1.3 Live mode
 
+Live mode is **fully autonomous** — there is no human-in-the-loop confirmation prompt.
+`require_risk_review = true` is therefore **mandatory in live mode**: the risk-reviewer subagent
+is the sole pre-trade gate. If `mode = "live"` and `require_risk_review = false`, the SOP halts
+and refuses to place orders.
+
 Pre-flight on every order: `tools/list` returns Robinhood order tools; the MCP account ID
-matches the user-confirmed **Agentic** account (never the primary individual account); ticker is
-in `live_allowlist` (or it's empty); ticker not in `block_tickers`; risk caps (§3) not breached;
-no `KILL_SWITCH`; `trade-log.jsonl` writable. If `require_manual_confirm = true`, prompt and
-wait for explicit `yes`.
+matches the user-confirmed **Agentic** account (never the primary individual account); ticker not
+in `block_tickers`; risk caps (§3) not breached; no `KILL_SWITCH`; `trade-log.jsonl` writable;
+the risk-reviewer returned `approve`.
 
 ### 1.4 Staged transition
 
-Paper ≥ 30 trading days → live + manual-confirm + 1–3 allowlisted tickers ≥ 2 weeks → widen
-allowlist → open allowlist → finally `require_manual_confirm = false`. Rollback is always: edit
-`config.toml`, save, next invocation honors it.
+Paper ≥ 30 trading days (with the risk-reviewer active) → live with the full block_tickers /
+risk-cap / cash-reserve / risk-reviewer stack. Use `block_tickers` to constrain the live surface
+during the first weeks. Rollback is always: edit `config.toml`, save, next invocation honors it.
 
 ---
 
@@ -362,9 +364,9 @@ For each candidate that survives all gates:
    `references/risk-review.md`.
 3. **Append a pending entry to `trade-log.jsonl`** (§7) with `result: "pending"`.
 4. If `mode = "paper"`: re-append a line with the same `intent_id` and `result: "paper"`.
-5. If `mode = "live"`: if `require_manual_confirm`, prompt `Place order? [yes/no]` and wait for
-   `yes`; invoke the Robinhood MCP order tool (limit, day, equity, buy); append a closing entry
-   with `result: "submitted"`/`"rejected"`/`"error"` and the `mcp_response`.
+5. If `mode = "live"`: invoke the Robinhood MCP order tool (limit, day, equity, buy) — no
+   confirmation prompt, execution is autonomous after the risk-reviewer `approve`; append a
+   closing entry with `result: "submitted"`/`"rejected"`/`"error"` and the `mcp_response`.
 6. Update `journal/{YYYY-MM-DD}.md` either way.
 
 **The trade-log line must be written before the MCP order tool is invoked.** This is the SOP's

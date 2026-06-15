@@ -23,7 +23,7 @@ Code session is the executor at runtime. `CLAUDE.md` is the always-loaded dispat
 .
 ├── CLAUDE.md                         ← Always-loaded dispatcher: goal, rules, daily loop
 ├── README.md                         ← (this file)
-├── config.toml                       ← User-edited: mode, allowlist, caps, universe pointer
+├── config.toml                       ← User-edited: mode, caps, universe pointer
 ├── themes.toml                       ← Ticker → theme mapping for P&L analytics
 ├── KILL_SWITCH                       ← (create to halt new orders; delete to resume)
 ├── trade-log.jsonl                   ← Append-only audit log (single analytics source)
@@ -55,14 +55,12 @@ Controls execution mode, safety gates, and the universe pointer. Full schema in
 
 ```toml
 mode = "paper"                              # "paper" | "live"
-live_allowlist = []                         # [] = all eligible in live; ["AAPL"] = only AAPL
-require_manual_confirm = true               # pause for "yes" before every live order
 block_tickers = []                          # global blocklist, overrides everything
 daily_loss_cap_pct = 0.02                   # halt new entries when day P&L ≤ −this × equity
 cash_reserve_pct = 0.10                     # minimum cash floor as a fraction of equity
 sop_universe_list_name = "Agent WatchList"  # Robinhood watchlist used as the universe
 discovery_mode = false                      # true = no universe filter (paper only)
-require_risk_review = true                  # spawn risk-reviewer subagent before each order
+require_risk_review = true                  # risk-reviewer gates every order; MANDATORY in live
 ```
 
 ### `themes.toml`
@@ -158,8 +156,8 @@ End-of-Day Reflection. The non-negotiable rules in references/strategy.md §0 ar
 ### Routine safety notes
 
 - The routine runs **autonomously**, with no approval prompts during the run. The trade-log +
-  Decision Framework + `config.toml::require_manual_confirm` + the risk-reviewer are the only
-  gates between the cloud session and a live Robinhood order.
+  Decision Framework + the risk-reviewer (mandatory in live) + the risk caps, cash reserve, and
+  `block_tickers` are the only gates between the cloud session and a live Robinhood order.
 - Keep `mode = "paper"` for the first ≥ 30 trading days. Read the journals and trade-log
   analytics before flipping live.
 - A cloud routine can push to `claude/*`-prefixed branches by default; journal commits land
@@ -228,7 +226,7 @@ See `references/strategy.md` §7.1 for the full schema and recipes.
 
 ## Stopping the SOP
 
-- **Pause for confirmation:** set `require_manual_confirm = true` in `config.toml`.
+- **Return to paper (no real orders):** set `mode = "paper"` in `config.toml`.
 - **Halt all new orders (exits keep running):** create an empty `KILL_SWITCH` file at repo root.
 - **Routine paused/deleted:** toggle or delete it at [claude.ai/code/routines](https://claude.ai/code/routines).
 

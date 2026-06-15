@@ -3,19 +3,13 @@
 # Schema: references/strategy.md §1.1
 
 # "paper" → SOP runs end-to-end but never invokes a Robinhood MCP order tool.
-# "live"  → SOP places real orders.
-mode = "paper"
+# "live"  → SOP places real orders. Fully autonomous: there is no human-in-the-loop
+#           confirmation. The risk-reviewer subagent (require_risk_review, below) is the
+#           mandatory pre-trade gate in live mode.
+mode = "live"
 
-# Empty list = all tickers eligible when in live mode.
-# Populated list = ONLY these tickers may receive live orders.
-# Use to stage the rollout: ["AAPL"] → ["AAPL","MSFT"] → [] (open).
-live_allowlist = []
-
-# true  = pause for explicit user "yes" in chat before every live order.
-# false = auto-execute live orders, gated only by allowlist, daily loss cap, kill switch.
-require_manual_confirm = true
-
-# Global blocklist — overrides everything.
+# Global blocklist — overrides everything. The one ticker-level kill mechanism in an
+# autonomous workflow: any symbol here can never receive an order.
 block_tickers = []
 
 # Daily loss cap as a fraction of Agentic-account equity. Halts new entries on breach.
@@ -38,6 +32,8 @@ discovery_mode = false
 # Two-agent risk review (references/risk-review.md, .claude/agents/risk-reviewer.md).
 # true  = every candidate trade is reviewed by the risk-reviewer subagent before any MCP
 #         order tool fires. Rejected trades still log with result = "rejected_by_risk_review".
-# false = Trader executes without a second-agent rule-check. Use only during the very first
-#         paper-mode shakedown before the Reviewer scaffolding is validated end-to-end.
+# false = Trader executes without a second-agent rule-check. Paper mode ONLY — use during the
+#         very first shakedown before the Reviewer scaffolding is validated end-to-end.
+# MANDATORY in live mode: with no human-in-the-loop confirmation, the Reviewer is the sole
+# pre-trade gate. Live mode HALTS and refuses to place orders if this is false.
 require_risk_review = true

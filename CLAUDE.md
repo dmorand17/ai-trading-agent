@@ -51,8 +51,11 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 2. **Account is the dedicated Agentic account** — not the user's primary individual account.
    Robinhood only permits agentic trading from dedicated Agentic accounts.
 3. **Market is open.** If closed, signal scans continue but no order tool may be invoked.
-4. **`config.toml` exists and parses.** Required: `mode`, `live_allowlist`,
-   `require_manual_confirm`. If missing, create with paper defaults and tell the user.
+4. **`config.toml` exists and parses.** Required: `mode`, `require_risk_review`. If missing,
+   create with paper defaults and tell the user. **In live mode, `require_risk_review` must be
+   `true`** — the SOP is fully autonomous (no human-in-the-loop confirmation), so the
+   risk-reviewer is the mandatory pre-trade gate. If `mode = "live"` and
+   `require_risk_review = false`, halt and tell the user.
 5. **SOP universe is reachable.** Pull the Robinhood watchlist named in
    `config.toml::sop_universe_list_name` via the MCP (`get_watchlists` → match by `display_name`
    → `get_watchlist_items`). If the named list does not exist, halt and tell the user. If
@@ -78,7 +81,7 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
    subagent (references/risk-review.md). Proceed only on "approve"; on "reject" log it and skip.
 6. Write the pending trade-log.jsonl line BEFORE any MCP order tool (strategy.md §6, §7).
 7. Execute by mode: paper → result "paper", no MCP call. live → place limit order (honoring
-   live_allowlist, block_tickers, require_manual_confirm), then log the result.
+   block_tickers), then log the result. No confirmation prompt — execution is autonomous.
 8. Scan all open positions for the §0.3 tiered trailing stop. Close on breach.
 9. Update journal/{YYYY-MM-DD}.md — mandatory even on zero-trade days (§0.4).
 ```

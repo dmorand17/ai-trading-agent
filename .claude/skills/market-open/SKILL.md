@@ -29,7 +29,7 @@ This is the **execution phase** of the AI Trading Agent SOP. Read the project `C
      `reject` → log `rejected_by_risk_review` and skip.
    - **Write the `pending` `trade-log.jsonl` line BEFORE any MCP order tool** (§7, §6).
    - Execute by mode: paper → log `result: "paper"`, no MCP call. live → place the limit order
-     (day, equity, buy), honoring `live_allowlist`, `block_tickers`, `require_manual_confirm`.
+     (day, equity, buy), honoring `block_tickers`. No confirmation prompt — execution is autonomous.
 4. **Set/confirm trailing stops** on every resulting position (`strategy.md` §0.3, §4.3) —
    record `peak_mark` in `positions.jsonl`.
 5. **Sweep open positions** for the §0.3 tiered trailing stop on the same pass.
