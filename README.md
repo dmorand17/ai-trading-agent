@@ -1,109 +1,100 @@
 # AI Trading Agent SOP
 
-A Claude Code skill that runs a daily Standard Operating Procedure for US-equity trading via the [Robinhood Agentic Trading MCP](https://robinhood.com/us/en/support/articles/agentic-trading-overview/).
+A Claude Code Standard Operating Procedure for US-equity trading via the [Robinhood Agentic
+Trading MCP](https://robinhood.com/us/en/support/articles/agentic-trading-overview/).
 
-The agent makes trade decisions from two (eventually three) independent cluster signals:
+The agent generates trade candidates from a small set of **classic, price-based strategies**
+computed from daily OHLCV and quotes:
 
-- **Signal A — Politician clusters** — multiple members of Congress filing buys of the same ticker in a tight window.
-- **Signal B — Insider clusters** — multiple Section-16 insiders (CEO/CFO/Director/10% owner) filing Form 4 open-market purchases (code `P`) in a tight window.
-- **Signal C — Social media (draft, not active)** — bullish-mention spikes across Reddit / Twitter / StockTwits. See [`references/social-signal.md`](references/social-signal.md).
+- **Trend-following** — buy strength already trending (`close > SMA20 > SMA50`).
+- **Momentum / breakout** — buy a clean breakout above a 20-day base on expanding volume.
+- **RSI mean-reversion** — buy a temporary oversold dip *within* an established uptrend.
 
-The skill is a **set of markdown files** — there is no application code in this repo. The Claude Code session is the executor at runtime.
+Each strategy scores 0–100; the best firing score sets the conviction tier, and when two or more
+fire on the same ticker the conviction upgrades one tier (confluence). Full mechanics in
+[`references/strategy.md`](references/strategy.md) §A.
+
+The SOP is a **set of markdown files** — there is no application code in this repo. The Claude
+Code session is the executor at runtime. `CLAUDE.md` is the always-loaded dispatcher.
 
 ## File layout
 
 ```
 .
-├── SKILL.md                          ← Always-loaded dispatcher
+├── CLAUDE.md                         ← Always-loaded dispatcher: goal, rules, daily loop
 ├── README.md                         ← (this file)
 ├── mode.toml                         ← User-edited: paper vs live, allowlist, manual-confirm
 ├── watchlist.json                    ← User-edited: universe + per-symbol caps + cash reserve
-├── KILL_SWITCH                       ← (create to halt; delete to resume)
-├── trade-log.jsonl                   ← Append-only audit log (analytics source)
+├── KILL_SWITCH                       ← (create to halt new orders; delete to resume)
+├── trade-log.jsonl                   ← Append-only audit log (single analytics source)
+├── positions.jsonl                   ← Trailing-stop state (peak_mark per open position)
 ├── journal/
 │   └── YYYY-MM-DD.md                 ← One markdown journal per trading day
-├── positions.jsonl                   ← Trailing-stop state (peak_mark per open position)
-└── references/
-    ├── data-sources.md               ← All upstream data feeds
-    ├── politician-signal.md          ← Signal A scoring
-    ├── insider-signal.md             ← Signal B scoring
-    ├── social-signal.md              ← Signal C — DRAFT, not yet active
-    ├── sec-edgar-form4.md            ← Form 4 XML schema + discovery
-    └── rules.md                      ← Mode, sizing, exits, kill switch, log schemas, analytics
+├── scripts/
+│   └── notify.sh                     ← ntfy push notifications (optional)
+├── references/
+│   ├── strategy.md                   ← Strategies, sizing, exits, mode, log schemas (canonical)
+│   └── risk-review.md                ← Two-agent risk-review flow
+└── .claude/
+    ├── agents/
+    │   └── risk-reviewer.md          ← Adversarial rule-check subagent
+    └── skills/                       ← Phase entry points (pre-market, market-open, …)
 ```
+
+> The original cluster-signal engine (congressional buys, insider Form 4) and the time-state
+> policy live in `_archived/` for reference. They are not part of the active SOP.
 
 ## Configuration files
 
-The SOP reads two config files at repo root on every invocation. Both are user-edited; the SOP never writes to them.
+The SOP reads two config files at repo root on every invocation. Both are user-edited; the SOP
+never writes to them.
 
 ### `mode.toml`
 
-Controls execution mode and risk caps. Full schema in `references/rules.md` §1.1.
+Controls execution mode and the safety gates. Full schema in `references/strategy.md` §1.1.
 
 ```toml
 mode = "paper"                     # "paper" | "live"
-live_allowlist = []                # empty = all; ["AAPL"] = only AAPL trades go live
+live_allowlist = []                # empty = all eligible in live; ["AAPL"] = only AAPL
 require_manual_confirm = true      # pause for "yes" before every live order
-block_tickers = []
-daily_loss_cap_pct = 0.02
-max_cluster_exposure_pct = 0.25
-max_ticker_exposure_pct = 0.05
+block_tickers = []                 # global blocklist
+daily_loss_cap_pct = 0.02          # halt new entries when day P&L ≤ −this × equity
+require_risk_review = true          # spawn the risk-reviewer subagent before each order
 ```
 
 ### `watchlist.json`
 
-Defines the trading universe, per-symbol allocation caps (overriding the 5% default), and the cash reserve floor. Full schema in `references/rules.md` §2.
+Defines the trading universe, per-symbol allocation caps (overriding the 5% default), and the
+cash reserve floor. Full schema in `references/strategy.md` §2.
 
 ```json
 {
   "watchlist": [
-    { "symbol": "SPY",  "description": "S&P 500 ETF — baseline market exposure",   "max_allocation_pct": 15 },
-    { "symbol": "QQQ",  "description": "Nasdaq ETF — tech sector exposure",          "max_allocation_pct": 10 },
-    { "symbol": "NVDA", "description": "GPU/AI infrastructure — high conviction",   "max_allocation_pct":  8 },
-    { "symbol": "AAPL", "description": "Large cap tech — stability anchor",          "max_allocation_pct":  8 },
-    { "symbol": "MSFT", "description": "Cloud/enterprise — AI infrastructure play",  "max_allocation_pct":  8 }
+    { "symbol": "SPY",  "description": "S&P 500 ETF — baseline market exposure",  "max_allocation_pct": 15 },
+    { "symbol": "QQQ",  "description": "Nasdaq ETF — tech sector exposure",         "max_allocation_pct": 10 },
+    { "symbol": "NVDA", "description": "GPU/AI infrastructure — high conviction",  "max_allocation_pct":  8 },
+    { "symbol": "AAPL", "description": "Large cap tech — stability anchor",         "max_allocation_pct":  8 },
+    { "symbol": "MSFT", "description": "Cloud/enterprise — AI infrastructure play", "max_allocation_pct":  8 }
   ],
   "cash_reserve_pct": 20
 }
 ```
 
-### `.env` (gitignored — for upstream API keys only)
+### `.env` (gitignored)
 
-Robinhood MCP auth is handled by the connector itself and does **not** belong here. Only put third-party data-source keys here.
-
-```bash
-SEC_USER_AGENT="Your Name your.email@example.com"   # required by SEC fair-access policy
-QUIVER_API_KEY=...                                   # optional: politician fallback
-FINNHUB_API_KEY=...                                  # optional: politician fallback
-```
+Robinhood MCP auth is handled by the connector itself and does **not** belong here. Only
+third-party keys (e.g. the optional ntfy push-notification token) go here. See `.env.example`.
 
 ## Prerequisites
 
-1. **Robinhood Agentic account** (separate from your primary individual account). Up to 10 per user. Onboard via desktop. See the [Robinhood Agentic Trading overview](https://robinhood.com/us/en/support/articles/agentic-trading-overview/).
+1. **Robinhood Agentic account** (separate from your primary individual account). Up to 10 per
+   user. Onboard via desktop. See the [Robinhood Agentic Trading overview](https://robinhood.com/us/en/support/articles/agentic-trading-overview/).
 2. **Robinhood MCP connector installed** in Claude Code:
    - Endpoint: `https://agent.robinhood.com/mcp/trading`
    - Transport: HTTP
    - Install via Claude Code's connectors UI or in `~/.claude/.mcp.json`.
-3. **SEC `User-Agent`** set (`SEC_USER_AGENT` in `.env`). SEC blocks default Python/curl agents.
-4. **`mode.toml` and `watchlist.json`** present and valid at repo root.
-5. **`.gitignore`** that excludes `.env`, `trade-log.jsonl`, `journal/`, `positions.jsonl`.
-
-## Standalone signal scanner
-
-For dry-runs and validating the methodology without involving Claude, run the standalone Form 4 scanner:
-
-```bash
-export SEC_USER_AGENT="Your Name your@email.com"   # required by SEC fair-access policy
-python3 scripts/scan_form4.py                       # default: 100 most recent filings
-python3 scripts/scan_form4.py --count 100 -v        # verbose: print every XML fetch
-python3 scripts/scan_form4.py --no-write            # stdout only
-```
-
-Output: stdout summary + `signals/form4-{YYYY-MM-DD}.json` with the structured cluster data. Stdlib only — no `pip install`. Read-only — does **not** call the Robinhood MCP or touch the trade log.
-
-The scanner implements Signal B's cluster definition (`references/insider-signal.md` §3) and scoring (§4): ≥2 distinct insiders, weighted count ≥ 4.0, ≥ $100K aggregate, code P only. Use it to (a) sanity-check the SOP's daily output against the same data, and (b) backfill historical days via the EDGAR daily-index (v2 — not yet implemented).
-
-Expected baseline: **most days produce zero qualifying clusters.** Form 4 activity is dominated by routine compensation (codes A, M, F); a real cluster of open-market buys is rare and informative.
+3. **`mode.toml` and `watchlist.json`** present and valid at repo root.
+4. **`.gitignore`** that excludes `.env`, `trade-log.jsonl`, `journal/`, `positions.jsonl`.
 
 ## Running the SOP interactively
 
@@ -111,129 +102,108 @@ From a Claude Code session **with this repo as the working directory**:
 
 ```
 > Run the SOP
-> Scan today's clusters
-> Check Form 4 filings
 > What should I trade today?
+> Scan the watchlist
+> Review the trade log
 ```
 
-The skill auto-activates from those prompts. It will:
+`CLAUDE.md` (the dispatcher) is always loaded, so the agent knows the goal, the non-negotiable
+rules, and the daily loop. It will:
 
 1. Check preconditions (MCP up, account is Agentic, market open, configs valid, no kill switch).
-2. Pull Signal A and Signal B for today.
-3. Score, apply the 5-question Decision Framework, size positions.
+2. Score each watchlist ticker against the three strategies.
+3. Apply the 5-question Decision Framework, size positions.
 4. Write a `pending` line to `trade-log.jsonl` for each candidate.
 5. Either skip the MCP (paper) or place a limit order (live, possibly behind a confirm prompt).
 6. Update `journal/YYYY-MM-DD.md` and `trade-log.jsonl` with final state.
 7. Scan open positions for the −8% hard stop and the profit-protection trailing stop.
 
+## Phase skills
+
+The SOP is split into four phase-specific skills under `.claude/skills/`. Each defers to
+`CLAUDE.md` and `references/strategy.md` — they are entry points, not replacements.
+
+| Skill | Phase | Recommended cron (America/New_York) |
+| --- | --- | --- |
+| `pre-market` | Research & draft candidates (no orders) | `0 9 * * 1-5` (09:00 ET) |
+| `market-open` | Execute planned trades + set stops | `35 9 * * 1-5` (09:35 ET) |
+| `daily-summary` | EOD snapshot, final stop sweep, reflection | `55 15 * * 1-5` (15:55 ET) |
+| `weekly-review` | Weekly P&L recap + tuning suggestions | `0 16 * * 5` (16:00 ET Fri) |
+
+Invoke any of them by name (`/pre-market`, `/market-open`, …) or let them auto-activate from the
+prompts in their descriptions.
+
 ## Automating with a Claude Code routine
 
-Claude Code routines run your SOP on a schedule from Anthropic-managed cloud infrastructure, so they keep working when your laptop is closed. Routines are in research preview on Pro / Max / Team / Enterprise with Claude Code on the web enabled. See the [routines documentation](https://code.claude.com/docs/en/routines).
+Claude Code routines run your SOP on a schedule from Anthropic-managed cloud infrastructure, so
+they keep working when your laptop is closed. See the [routines documentation](https://code.claude.com/docs/en/routines).
 
 ### One-time setup
 
 1. Push this repo to a GitHub repository.
-2. Connect that repository to Claude Code on the web (`/web-setup` from the CLI, or follow the prompts when creating the routine).
-3. Add the **Robinhood Agentic Trading** MCP connector to your claude.ai account at [Settings → Connectors](https://claude.ai/customize/connectors). Routines can use any connector you've connected to your claude.ai account — connectors installed locally via `claude mcp add` are not visible to routines.
-4. (Optional) Add Quiver / Finnhub / SEC `User-Agent` as environment variables on the cloud environment you'll attach to the routine.
+2. Connect that repository to Claude Code on the web (`/web-setup` from the CLI).
+3. Add the **Robinhood Agentic Trading** MCP connector to your claude.ai account at
+   [Settings → Connectors](https://claude.ai/customize/connectors). Routines can only use
+   connectors connected to your claude.ai account — locally-installed MCPs are not visible.
 
 ### Create the routine
 
-From the CLI in this repo:
-
-```text
-/schedule daily SOP run at 9:35 ET — read SKILL.md and run the daily loop
-```
-
-Or, equivalently, from the web at [claude.ai/code/routines](https://claude.ai/code/routines), click **New routine**.
-
-Recommended routine config:
-
-| Field | Value |
-| --- | --- |
-| Name | `Daily Trading SOP` |
-| Prompt | See below |
-| Repositories | This repo |
-| Environment | Default (Trusted) is fine; add `SEC_USER_AGENT`, `QUIVER_API_KEY` etc. as env vars |
-| Connectors | **Robinhood Agentic Trading** (required). Others optional. |
-| Triggers (recommended — time-state aware) | See table below |
-
-**Time-state-aware schedule** (per `references/time-state.md`). Each trigger fires the same routine; the SOP resolves its own state and applies the right modifiers:
-
-| Cron (America/New_York) | State at trigger | What runs |
-| --- | --- | --- |
-| **09:35 weekdays** | A — Morning Discovery | Full SOP loop. Overnight cluster signals execute with **State A sizing (0.5×)** and wider spread filter. |
-| **10:35 weekdays** | B — Midday Drift | Position sweep. Hard-stop ratchet resumes. New entries gated to **high-tier only**. |
-| **15:05 weekdays** | C — Power Hour | Best execution window. Trailing-stop tightening across the book. Standard sizing. |
-| **15:55 weekdays** | C (end) | End-of-Day Reflection + final stop-out sweep + journal commit. |
-
-If your daily routine cap is tight, drop the 10:35 trigger — State B is mostly monitoring. Single-trigger fallback: just **09:35** (loses the Power Hour edge).
+Recommended: one routine with the four triggers above. Each trigger invokes the matching phase
+skill. A minimal single-trigger fallback is just `market-open` at 09:35.
 
 **Prompt (paste into the routine):**
 
 ```text
-Activate the ai-trading-agent skill (loads SKILL.md from this repo). Execute the
-daily SOP loop end-to-end:
-
-1. Verify all hard preconditions (SKILL.md §3). Halt with a written reason if any
-   precondition fails — do not place trades on a partial check.
-2. Resolve the current time state (A/B/C/CLOSED) per references/time-state.md
-   §1. Apply the state's sizing multiplier, spread filter, and entry gate.
-3. Refresh Signal A (politicians) and Signal B (insiders) per references/
-   politician-signal.md and references/insider-signal.md.
-4. For each candidate, answer the 5-question Decision Framework (SKILL.md §5)
-   in writing in the journal.
-5. Honor mode.toml: paper today unless mode = "live".
-6. If require_risk_review = true: spawn the risk-reviewer subagent with the
-   proposal (.claude/agents/risk-reviewer.md). Only proceed on "approve".
-7. Write trade-log.jsonl entries BEFORE any MCP order tool call. Include
-   time_state and state_size_multiplier.
-8. Place orders (or paper-log them) per references/rules.md.
-9. Scan open positions for the −8% hard stop AND the profit-protection trailing
-   stop (rules.md §0.3 and §4.3). Close on breach.
-   - Skip the §4.3 hard-stop ratchet in State A (time-state.md §2.5).
-10. Update journal/{today}.md with all required sections, including
-    End-of-Day Reflection. Commit the journal entry and trade-log line to a
-    claude/* branch and open a PR back to main.
-
-Stop conditions and safety rules in SKILL.md §2 and §8 are non-negotiable —
-do not override them.
+Follow this repo's CLAUDE.md (the AI Trading Agent SOP dispatcher) and run today's phase.
+Verify all hard preconditions and halt with a written reason if any fail — never trade on a
+partial check. Honor mode.toml (paper unless mode = "live"). If require_risk_review = true,
+spawn the risk-reviewer subagent and proceed only on "approve". Write the trade-log.jsonl line
+BEFORE any MCP order tool. Update journal/{today}.md with all sections, including the
+End-of-Day Reflection. The non-negotiable rules in references/strategy.md §0 are absolute.
 ```
-
-### Additional triggers (optional)
-
-- **Mid-day check (12:15 ET):** second scheduled trigger on the same routine, scoped to "scan open positions only, write any required exits, update today's journal".
-- **End-of-day (16:05 ET):** third scheduled trigger to write End-of-Day Reflection and commit.
-- **API trigger:** wire your phone or a Slack slash-command to `/fire` the routine ad-hoc. See routine docs for the bearer-token flow.
 
 ### Routine safety notes
 
-- The routine runs **autonomously**, with no approval prompts during the run. The trade-log + Decision Framework + `mode.toml` `require_manual_confirm` are the only gates between the cloud session and a live Robinhood order.
-- Keep `mode = "paper"` for the first ≥ 30 trading days of routine operation. Read the journal entries and trade-log analytics before flipping live.
-- A routine running in the cloud can push to `claude/*`-prefixed branches by default. The journal commits will land on those branches; you'll see them as PRs to review locally.
-- The cloud environment uses Trusted network access by default. SEC.gov and Robinhood's MCP are both reachable from the trusted allowlist; if you add a custom data source (e.g. CapitolTrades scraping), you may need to widen the network policy. See the [environment docs](https://code.claude.com/docs/en/claude-code-on-the-web#network-access).
-- Routines count against your account's daily run cap. A 9:35 / 12:15 / 16:05 schedule uses ≤ 3 runs per trading day.
+- The routine runs **autonomously**, with no approval prompts during the run. The trade-log +
+  Decision Framework + `mode.toml::require_manual_confirm` + the risk-reviewer are the only gates
+  between the cloud session and a live Robinhood order.
+- Keep `mode = "paper"` for the first ≥ 30 trading days. Read the journals and trade-log
+  analytics before flipping live.
+- A cloud routine can push to `claude/*`-prefixed branches by default; journal commits land
+  there as PRs you review locally.
 
 ## Local automation alternatives
 
-If you'd rather run on your own machine instead of in the cloud:
+- **`/loop` in an open CLI session** — the `loop` skill at 30–60m intervals during market hours.
+- **macOS LaunchAgent / cron** — run `claude -p "Run today's SOP phase"` from launchd or cron.
+  Requires your laptop on and the CLI authenticated.
 
-- **`/loop` in an open CLI session** — `loop` skill at 30m or 60m intervals during market hours. Useful for first-day shakedowns.
-- **Desktop scheduled tasks** — Claude Desktop has a "Local" routine option that runs on your machine via the Desktop app's scheduler.
-- **macOS LaunchAgent / cron** — run `claude -p "Run the SOP"` from a launchd plist or a cron line. Requires your laptop to be on and the CLI to be authenticated.
+The hard requirement either way is that **the Robinhood MCP connector is reachable from wherever
+the SOP runs**.
 
-The hard requirement either way is that **the Robinhood MCP connector is reachable from wherever the SOP runs**.
+## Notifications (optional)
+
+`scripts/notify.sh` posts a push notification to an [ntfy](https://ntfy.sh) topic. The phase
+skills have `TODO(notify)` hooks ready to call it.
+
+```bash
+export NTFY_TOKEN=tk_...                       # required
+export NTFY_SERVER=https://ntfy.example.com    # optional, default https://ntfy.sh
+export NTFY_TOPIC=agentic-trading              # optional, default agentic-trading
+./scripts/notify.sh -t "market-open" "Bought 5 NVDA @ $847.50"
+```
 
 ## Analytics
 
-`trade-log.jsonl` is the single source of truth for every trade across every day. Quick recipes:
+`trade-log.jsonl` is the single source of truth for every trade across every day.
 
 ```bash
 # Latest state per intent
 jq -s 'group_by(.intent_id) | map(max_by(.timestamp_utc))' trade-log.jsonl
 
-# Total realized P&L on closed sells
-jq -s '[.[] | select(.side=="sell" and .result=="filled") | .realized_pnl_usd // 0] | add' trade-log.jsonl
+# Realized P&L by strategy
+jq -s '[.[] | select(.side=="sell" and .result=="filled")] | group_by(.signal_source)
+       | map({src: .[0].signal_source, pnl: ([.[].realized_pnl_usd] | add)})' trade-log.jsonl
 ```
 
 ```sql
@@ -244,72 +214,35 @@ FROM trades WHERE side='sell' AND result='filled'
 GROUP BY signal_source;
 ```
 
-See `references/rules.md` §7.3 for the full analytics section.
+See `references/strategy.md` §7.1 for the full schema and recipes.
 
 ## Stopping the SOP
 
-- **One trade refused:** edit `mode.toml`, set `require_manual_confirm = true`. Next run will pause.
-- **All new orders halted (existing exits keep running):** create an empty file named `KILL_SWITCH` at repo root.
-- **Routine paused:** toggle the routine's `Repeats` switch at [claude.ai/code/routines](https://claude.ai/code/routines).
-- **Routine deleted:** delete from the same page. Past sessions remain in your session list.
+- **Pause for confirmation:** set `require_manual_confirm = true` in `mode.toml`.
+- **Halt all new orders (exits keep running):** create an empty `KILL_SWITCH` file at repo root.
+- **Routine paused/deleted:** toggle or delete it at [claude.ai/code/routines](https://claude.ai/code/routines).
 
-## Reading the skill
+## Reading the SOP
 
-If you want to understand what the agent does without running it:
-
-1. Read `SKILL.md` — the dispatcher.
-2. Read `references/rules.md` — the canonical rules, including the non-negotiables in §0.
-3. Read one signal file (`references/insider-signal.md` is the most mechanical).
-
-Each reference file is self-contained and tunable at the bottom (`[signal_a]`, `[signal_b]` knobs).
+1. Read `CLAUDE.md` — the dispatcher (goal, rules, loop, decision framework).
+2. Read `references/strategy.md` — the canonical strategies, sizing, exits, and the
+   non-negotiables in §0.
+3. Read `references/risk-review.md` — the two-agent rule-check.
 
 ## Roadmap / Ideas
 
-Loose list of things that aren't built yet. Pull from the top.
-
-### 1. ~~Two-agent split — Trader + Risk Reviewer~~ ✅ Built
-
-Trader (main session running `SKILL.md`) spawns the `risk-reviewer` subagent (`.claude/agents/risk-reviewer.md`) before every MCP order call. Reviewer does pure rule-checking against `references/rules.md` §0, the watchlist, mode.toml, and the trade log. Binary approve/reject. Toggle: `require_risk_review = true` in `mode.toml`. Full design in `references/risk-review.md`.
-
-Open follow-ups (not yet built):
-
-- Two-routine cloud variant (Routine A writes proposals/, Routine B reviews on PR event). Documented in `references/risk-review.md` §9.
-- Allowing the Reviewer to *propose* exits when it spots a Form 4 sale that the Trader missed.
-
-### 2. Activate Signal C (social media)
-
-See `references/social-signal.md`. Pick one source (ApeWisdom is easiest), run in parallel with A and B for ≥ 30 trading days, then flip `signal_c.active = true` in `mode.toml`.
-
-### 3. Backtest harness
-
-A read-only mode that replays historical Form 4 + politician PTR data against the current rules, producing a hypothetical `trade-log.jsonl`. Validates rule changes before they affect real money. Probably its own skill in a sibling repo.
-
-### 4. Periodic rebalance against `watchlist.json`
-
-If a watchlist symbol is *below* its `max_allocation_pct` for ≥ N weeks and the signal layer hasn't produced an entry, optionally top up to a configurable floor. Decision: separate skill, or `mode.toml` toggle?
-
-### 5. Earnings + insider-window calendar
-
-Block entries in the 5 trading days before earnings; block insider-signal entries inside the SEC trading blackout window. Both are knowable in advance from EDGAR + the issuer's IR calendar.
-
-### 6. Slack / push notification on every live order
-
-Optional MCP connector that posts pre-trade review + post-fill confirmation to a private Slack channel. Useful as a secondary audit trail and an "I'm awake" signal when the routine is autonomous.
-
-### 7. Weekly summary routine
-
-A second routine that runs Saturday morning, reads the week's `journal/*.md` and `trade-log.jsonl`, and writes a one-page weekly review with P&L by signal source, win rate, and tuning suggestions for the knobs in `politician-signal.md` / `insider-signal.md`.
-
-### 8. Position-state file
-
-`positions.jsonl` for trailing-stop state (`peak_mark`, active tier) is referenced in `rules.md` §4.3 but doesn't exist yet. Spec it and have the SOP write/read it.
-
-### 9. Signal-quality metrics dashboard
-
-Compute hit rate, average forward return at 5/10/30 days, and decay curve per signal source. Useful for deciding whether to deprecate a source or tighten its thresholds.
+- **Re-introduce the cluster signals** (politician + insider Form 4) from `_archived/` as an
+  additional candidate source alongside the technical strategies.
+- **Time-state policy** (morning / midday / power-hour modifiers) — archived; re-add if the
+  paper track record shows a time-of-day edge worth the complexity.
+- **Backtest harness** — replay historical OHLCV against the strategy rules to validate changes
+  before they touch real money.
+- **Signal-quality metrics** — hit rate and forward return per strategy to decide what to keep.
 
 ---
 
 ## Disclaimer
 
-This is documented decision logic, not financial advice. The hard cap in `rules.md` §0.1, the per-symbol limits in `watchlist.json`, and the cash reserve in `watchlist.json` are user-settable; pick conservative levels and start in paper mode.
+This is documented decision logic, not financial advice. The hard cap in `strategy.md` §0.1, the
+per-symbol limits in `watchlist.json`, and the cash reserve are user-settable; pick conservative
+levels and start in paper mode.
