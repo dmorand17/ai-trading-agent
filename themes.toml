@@ -8,7 +8,7 @@
 # in the same operation. The `theme` field in trade-log.jsonl is populated from here.
 
 [nuclear]
-tickers = ["CEG", "VST", "CCJ", "BWXT"]
+tickers = ["CEG", "VST", "CCJ", "BWXT", "SMR"]
 
 [robotics]
 tickers = ["ISRG", "TER", "ROK", "PATH"]
@@ -20,7 +20,7 @@ tickers = ["RKLB", "ASTS", "LMT", "LUNR"]
 tickers = ["NVDA", "AMD", "ARM", "PLTR", "ANET"]
 
 [data_centers]
-tickers = ["EQIX", "DLR", "VRT", "SMCI", "GEV", "CRWV", "NBIS", "ORCL"]
+tickers = ["EQIX", "DLR", "VRT", "SMCI", "GEV", "CRWV", "NBIS", "ORCL", "APLD"]
 
 [cybersecurity]
 tickers = ["CRWD", "PANW", "ZS", "FTNT"]
