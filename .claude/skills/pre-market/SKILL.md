@@ -54,8 +54,8 @@ Always run these four in order; the rest builds on them.
 ## Notification policy: silent unless urgent
 
 "Urgent" = a high-tier or confluence candidate fired, OR an open position is already at/through
-its −8% hard stop (§0.3) or trailing band (§4.3) and will need action at the open, OR a stop
-condition is live (`CLAUDE.md` stop conditions). Otherwise stay silent.
+its §0.3 trailing band and will need action at the open, OR a stop condition is live (`CLAUDE.md`
+stop conditions). Otherwise stay silent.
 
 <!-- TODO(notify): wire to scripts/notify.sh when ready, e.g.
        ./scripts/notify.sh -t "pre-market" "<message>"

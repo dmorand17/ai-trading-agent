@@ -18,9 +18,9 @@ session is the right hour to lock in gains before overnight risk.
 1. **Preconditions** (`CLAUDE.md`) — confirm market status; if still open, exits/tightening may
    be placed; if closed, queue exits for the next open (§0.5). Pull live cash + positions from
    the MCP for the snapshot.
-2. **Final trailing-stop sweep** across the whole book (`strategy.md` §4.3, §0.3): update each
-   `peak_mark`, recompute bands, close anything through its band or ratcheted hard stop, and cut
-   any position at/through the −8% hard stop.
+2. **Final trailing-stop sweep** across the whole book (`strategy.md` §0.3, §4.3): update each
+   `peak_mark`, recompute the tier band, and close anything where `current_mark ≤
+   peak_mark × (1 − band)`.
 3. **EOD portfolio snapshot** → refresh the **Portfolio Status** section of
    `journal/{YYYY-MM-DD}.md` with end-of-day cash, every open position (ticker + qty + avg
    entry), total equity, mode, market status.

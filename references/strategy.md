@@ -33,12 +33,29 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 - If the spread is so wide that `current_ask × 1.002` is still inside the spread, skip the
   trade — the book is too thin.
 
-### 0.3 Hard stop: −8% from entry, close without waiting
+### 0.3 Trailing stop: tiered band, close without waiting
 
-- For every open position, compute `(current_mark − entry_price) / entry_price` on every loop.
-- If ≤ `−0.08`, submit a closing limit at `current_bid × 0.998` **immediately**.
-- No averaging down, no "wait for the bounce," no overriding by strategy score.
-- Independent of, and tighter than, the trailing stop (§4.3).
+Single mark-based stop, in flight on every open position from day 1.
+
+- Track per open position: `peak_mark = max(entry_price, max mark observed since entry)` and
+  `gain_pct = (peak_mark − entry_price) / entry_price`.
+- The trailing band tightens as `gain_pct` rises:
+
+  | Position gain | Trailing band (drawdown from `peak_mark`) |
+  | --- | --- |
+  | < +15%       | 12% |
+  | +15% to +24% | 8% |
+  | +25% to +49% | 6% |
+  | ≥ +50%       | 4% |
+
+- On every loop: re-read `current_mark` → update `peak_mark` → recompute `gain_pct` → look up
+  band → if `current_mark ≤ peak_mark × (1 − band)`, submit a closing limit at
+  `current_bid × 0.998` **immediately**.
+- The band only ever tightens; `peak_mark` only rises. No averaging down, no "wait for the
+  bounce," no overriding by strategy score.
+- On day 1, `peak_mark = entry_price`, so the worst-case stop is **12% below entry**. As the
+  position rises, the floor ratchets up with `peak_mark`.
+- Mechanics (persistence, gap-through-stop, between-session triggers) in §4.3.
 
 ### 0.4 Journal mandatory every day, even on no-trade days
 
@@ -53,7 +70,7 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 - Source of truth: (1) Robinhood MCP market-status read; (2) calendar fallback Mon–Fri
   09:30–16:00 America/New_York, excluding NYSE holidays.
 - If closed → signal scans and journal entries continue; **no orders**, including exits. A
-  hard-stop exit (§0.3) that fires after close is queued for the next open and logged.
+  trailing-stop exit (§0.3) that fires after close is queued for the next open and logged.
 
 ---
 
@@ -108,8 +125,8 @@ Buy a temporary oversold dip *within* an established uptrend — never a falling
   - `+15` if `close` is within 3% of `SMA50` (pullback to support, not a collapse).
   - `−25` if `close < SMA50` (no uptrend → do not fire; enforced by the fire condition).
   - Clamp to 0–100. Below 45 → treat as `no`.
-- **Caution:** mean-reversion entries get a tighter watch — the −8% hard stop (§0.3) is the
-  backstop if the "dip" keeps falling.
+- **Caution:** mean-reversion entries get a tighter watch — the §0.3 trailing stop (12% from
+  entry on day 1) is the backstop if the "dip" keeps falling.
 
 ### A.4 Tuning knobs
 
@@ -265,36 +282,30 @@ Skip any ticker with 20-day average daily dollar volume < $5M.
 
 ### 4.2 Exits (this is how positions close — strategies never produce sells)
 
-Two stops are always in flight. Whichever fires first wins.
+The §0.3 trailing stop and the time stop are always in flight. Whichever fires first wins.
 
 | Exit reason | Trigger | Action |
 | --- | --- | --- |
-| Hard stop | −8% from entry (§0.3) | close 100% at `bid × 0.998`, no waiting |
-| Trailing stop | drawdown from peak ≥ tier band (§4.3) | close 100% at `bid × 0.998` |
+| Trailing stop | drawdown from `peak_mark` ≥ tier band (§0.3) | close 100% at `bid × 0.998`, no waiting |
 | Time stop | 30 trading days held | close 100% at `bid × 0.998` |
-| Take profit (partial) | +25% from entry | close 50% |
-| Take profit (final) | +50% from entry | close remaining |
 | Kill switch | `KILL_SWITCH` appears | freeze new entries; existing exits continue |
 
-### 4.3 Profit-protection trailing stop (tightens as the gain grows)
+### 4.3 Trailing-stop mechanics
 
-Track per open position: `peak_mark` (highest mark since entry, updated each loop) and
-`gain_pct = (peak_mark − entry_price) / entry_price`.
+The trailing rule and band table live in §0.3. This section covers the supporting mechanics.
 
-| Position gain | Trailing band (drawdown from `peak_mark`) | Hard-stop ratchet (replaces §0.3 floor) |
-| --- | --- | --- |
-| < +15% | 12% | −8% from entry (unchanged) |
-| +15% to +24% | **7%** | move hard stop to **break-even** |
-| +25% to +49% | **5%** (partial TP closes 50%) | move hard stop to **+10% from entry** |
-| ≥ +50% | **3%** (final TP closes remainder) | move hard stop to **+25% from entry** |
-
-**Rules.** (1) The band and ratchet only ever **tighten**, never widen; `peak_mark` only rises.
-(2) Each loop: re-read mark → update `peak_mark` → recompute `gain_pct` → look up band + ratchet
-→ if `current_mark ≤ peak_mark × (1 − band)` or `current_mark ≤ ratcheted_hard_stop`, close
-immediately. (3) Persist `peak_mark` + active tier in `positions.jsonl` (one record per
-`ticker × entry_intent_id`) so state survives across runs. (4) Take-profit rows fire *in
-addition*; on a gap through both, prefer the more conservative. (5) A band trigger between
-sessions queues the close for the next open (§0.5).
+- **State persistence:** write `peak_mark` per open position to `positions.jsonl` (one record
+  per `ticker × entry_intent_id`) so trailing state survives across runs. Schema:
+  `{ticker, entry_intent_id, entry_price, qty, peak_mark, last_updated_utc}`. Append-only;
+  reconstruct state by taking the latest line per `(ticker, entry_intent_id)`.
+- **Loop tick:** on every SOP invocation, for each open position — re-read `current_mark`,
+  update `peak_mark = max(peak_mark, current_mark)`, look up the band from the §0.3 table by
+  `gain_pct = (peak_mark − entry_price) / entry_price`, check
+  `current_mark ≤ peak_mark × (1 − band)`.
+- **Gap-through-stop:** if the position opens through the stop, exit immediately at the open
+  via a limit at `current_bid × 0.998`; do not wait for a retest.
+- **Between sessions:** a stop trigger observed when the market is closed queues the close
+  for the next open (§0.5). Log the queued exit immediately; submit at the open.
 
 ### 4.4 Cooldown
 
@@ -390,8 +401,8 @@ transition (`pending → submitted → filled`). Reconstruct state by taking the
 `intent_id`.
 
 **Sell-only analytics fields** (added when a sell fills): `entry_intent_id`, `realized_pnl_usd`,
-`realized_return_pct`, `holding_period_days`, `exit_reason` (one of `hard_stop`,
-`trailing_stop`, `time_stop`, `take_profit_partial`, `take_profit_final`, `manual`).
+`realized_return_pct`, `holding_period_days`, `exit_reason` (one of `trailing_stop`,
+`time_stop`, `manual`).
 
 Quick recipes:
 
@@ -433,7 +444,7 @@ jq -s '[.[] | select(.side=="sell" and .result=="filled")] | group_by(.signal_so
 ## Positions Closed
 | Time  | Symbol | Reason             | Qty | Entry   | Exit    | P&L    |
 |-------|--------|--------------------|-----|---------|---------|--------|
-| 14:22 | TSLA   | −8% hard stop §0.3 | 10  | $215.00 | $197.80 | −$172  |
+| 14:22 | TSLA   | trailing stop §0.3 | 10  | $215.00 | $189.20 | −$258  |
 
 (If none: `None today.`)
 
@@ -451,8 +462,8 @@ at the first SOP run of the day; reflection written at the last run or by 16:30 
 ## 8. Kill switch
 
 A file named `KILL_SWITCH` at repo root (any contents) means: no new entries; no new
-signal-driven sells; existing protective exits (trailing stop, time stop, take profit) **still
-run**; signal scans still write the journal. Delete the file to re-enable; log the event.
+signal-driven sells; existing protective exits (trailing stop, time stop) **still run**; signal
+scans still write the journal. Delete the file to re-enable; log the event.
 
 ---
 

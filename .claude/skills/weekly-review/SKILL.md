@@ -23,7 +23,7 @@ places orders and never edits `trade-log.jsonl` or prior daily journals (§10: a
    - Total realized P&L for the week and per **strategy** (`signal_source`: trend / breakout /
      rsi_revert and confluence combos).
    - Win rate (closed sells with `realized_pnl_usd > 0` ÷ total closed).
-   - Exit-reason breakdown (hard_stop / trailing_stop / take_profit_* / time_stop).
+   - Exit-reason breakdown (trailing_stop / time_stop / manual).
    - Open positions carried into next week + unrealized P&L.
    - **Benchmark check:** compare the week's net return (realized + unrealized) against SPY over
      the same window — the goal is to beat the S&P 500 (`CLAUDE.md`).

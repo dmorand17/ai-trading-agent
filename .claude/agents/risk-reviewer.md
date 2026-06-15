@@ -80,8 +80,9 @@ You may also read `journal/{today}.md` to corroborate a Trader claim.
   ticker is in the watchlist, else the 5% default.
 - [ ] **§0.2 Limit-only & near-ask.** `proposal.side == "buy"` and the limit is within 0.2% of
   recent ask (`limit ≈ ask × 1.002`). If `limit_price > ask × 1.005`, reject — too aggressive.
-- [ ] **§0.3 Hard-stop math.** `q5_max_loss_usd ≈ qty × limit_price × 0.08` within rounding. If
-  wildly off, reject — the Trader miscomputed risk.
+- [ ] **§0.3 Trailing-stop math.** `q5_max_loss_usd ≈ qty × limit_price × 0.12` within rounding
+  (12% is the day-1 trailing band when `peak_mark = entry_price`). If wildly off, reject — the
+  Trader miscomputed risk.
 - [ ] **§0.4 Journal exists.** `journal/{today}.md` exists.
 - [ ] **§0.5 Market open.** `proposal.market_status == "open"`.
 

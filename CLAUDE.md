@@ -33,8 +33,12 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 1. **Never invest more than 5% of total portfolio value in a single position** (overridable
    per-symbol via `watchlist.json`).
 2. **Never place a market order.** Limit orders only, within 0.2% of the current ask.
-3. **If an open position drops 8% from entry, close it without waiting** — no second-guessing,
-   no averaging down.
+3. **A tiered trailing stop protects every open position from day 1.** Track each position's
+   `peak_mark` (max of entry and every mark observed since); close immediately when the
+   current mark falls below `peak_mark × (1 − band)`. The band tightens as gain grows:
+   **12% / 8% / 6% / 4%** at gain tiers **<+15% / +15–24% / +25–49% / ≥+50%**. Day 1: peak =
+   entry, so the floor is 12% below entry; as the position rises, the floor ratchets up. No
+   averaging down, no waiting. Mechanics in `references/strategy.md` §0.3.
 4. **Always write a journal entry for the day, even with zero trades.** No-trade entries record:
    what was scanned, candidates skipped, why.
 5. **Never trade when the US market is closed.** Check via the Robinhood MCP (or calendar
@@ -72,8 +76,7 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
 6. Write the pending trade-log.jsonl line BEFORE any MCP order tool (strategy.md §6, §7).
 7. Execute by mode: paper → result "paper", no MCP call. live → place limit order (honoring
    live_allowlist, block_tickers, require_manual_confirm), then log the result.
-8. Scan all open positions for the −8% hard stop (§0.3) and the profit-protection trailing stop
-   (§4.3). Close on breach.
+8. Scan all open positions for the §0.3 tiered trailing stop. Close on breach.
 9. Update journal/{YYYY-MM-DD}.md — mandatory even on zero-trade days (§0.4).
 ```
 
@@ -87,9 +90,10 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
    bankruptcy, fraud, SEC enforcement, or accounting-restatement headline in the last 14 days.
 4. **What do the moving averages / RSI say?** This is also the strategy input — confirm the
    firing strategy's read still holds at execution time.
-5. **Risk if the trade goes wrong?** State the dollar loss at the −8% hard stop
-   (`qty × entry × 0.08`) and confirm it's within the daily loss cap (`daily_loss_cap_pct`,
-   default 2% of equity) after any realized intraday losses.
+5. **Risk if the trade goes wrong?** State the day-1 worst-case dollar loss
+   (`qty × entry × 0.12`) — the 12% floor from the §0.3 trailing stop at peak = entry — and
+   confirm it's within the daily loss cap (`daily_loss_cap_pct`, default 2% of equity) after
+   any realized intraday losses.
 
 ## Load on demand
 
@@ -126,7 +130,7 @@ becomes unparseable.
 ## Reporting back
 
 After each loop, summarize in ≤5 lines: candidates surfaced (by tier) · orders placed (count +
-mode) · open positions touched (incl. any −8% stop-outs) · stop conditions hit · paths to
+mode) · open positions touched (incl. any trailing-stop exits) · stop conditions hit · paths to
 today's `trade-log.jsonl` and `journal/{YYYY-MM-DD}.md`.
 
 ## Git practices (inherited)
