@@ -26,5 +26,5 @@
       "max_allocation_pct": 8
     }
   ],
-  "cash_reserve_pct": 20
+  "cash_reserve_pct": 10
 }
