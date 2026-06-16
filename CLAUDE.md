@@ -1,51 +1,38 @@
 # AI Trading Agent SOP — project instructions
 
 This file is the always-loaded dispatcher for the AI Trading Agent SOP. It defines the goal,
-the non-negotiable safety rules, the daily loop, and where to load detail on demand. The Claude
-Code session is the executor at runtime — there is no application code.
+the safety rules, the manual trading loop, and where to load detail on demand. The Claude Code
+session is the executor at runtime — there is no application code.
 
 ## Goal
 
-**Beat the S&P 500.** The objective is to outperform the S&P 500 (benchmark: SPY total return)
-on a risk-adjusted basis over the long run — not to maximize raw return, and not to trade for
-its own sake. Every strategy, sizing, and exit rule serves that goal.
+**Beat the S&P 500 (SPY), for fun.** This is a small, for-fun account (under $1k). The objective
+is to outperform SPY total return over the long run — judged against the benchmark, not zero.
+Capital is small and this is run manually for now; the rules are deliberately light.
 
-- The benchmark is SPY (or ^GSPC) total return over the same period as the trade log.
-- "Beating" means net realized + unrealized return after fees exceeds SPY's return over the
-  matching window. Track this in the weekly review.
-- A losing month that still beats a down S&P is a win; a winning month that trails a ripping
-  S&P is a miss. Judge against the benchmark, not zero.
-- Capital preservation comes first: the non-negotiable rules in `references/strategy.md` §0
-  always win, even when chasing the benchmark would suggest otherwise.
+The guiding style is **Peter Lynch — "let your winners run."** Don't pull the flowers to water
+the weeds: don't sell winners to add to losers. A handful of big winners carries the account.
 
 ## When this SOP is in play
 
-Engage the SOP when the user asks to: run the SOP / scan for trade ideas / "what should I trade
-today"; place a trade or review the trade log; or on a scheduled daily cadence. The phase skills
-in `.claude/skills/` (`pre-market`, `market-open`, `daily-summary`, `weekly-review`) are
-phase-specific entry points that all defer to this file and `references/strategy.md`. The
-`adhoc-trader` skill is the on-demand, human-in-the-loop entry point for a user-directed trade
-("buy 10 NVDA now") — same audit-trail gates, but the user picks ticker/side/order type and may
-override a risk-review reject.
+Engage the SOP when the user asks to: run the SOP / review the trade log / place a trade; or on
+a manual cadence. The phase skills in `.claude/skills/` (`market-research`, `stock-trader`,
+`portfolio-review`) are phase-specific entry points that all defer to this file and
+`references/strategy.md`. The `stock-trader` skill is the human-in-the-loop entry point for trade
+execution — a single user-directed trade ("buy 10 NVDA now") or a planned set; the user picks
+ticker/side/order type and may override a risk-review reject.
 
 ## Non-negotiable rules (apply always, override everything)
 
-Bright-line invariants. If any conflicts with a strategy score, the rule wins. Full mechanics in
-`references/strategy.md` §0.
+Full mechanics in `references/strategy.md` §0.
 
-1. **Never invest more than 15% of total portfolio value in a single position.** Universal cap
-   — no per-symbol overrides.
-2. **Prefer limit orders; use market orders only when fractional shares are required.** Entry logic: if `floor(tier_$ / ask) ≥ 1`, place a limit order at `min(ask × 1.002, SMA10 × 1.01)` for whole shares. If `floor(tier_$ / ask) < 1` (stock too expensive for even 1 whole share at tier sizing), place a `dollar_amount` market order during `regular_hours` only. Exits always use limit orders at `bid × 0.998` — never market for exits.
-3. **A tiered trailing stop protects every open position from day 1.** Track each position's
-   `peak_mark` (max of entry and every mark observed since); close immediately when the
-   current mark falls below `peak_mark × (1 − band)`. The band tightens as gain grows:
-   **12% / 8% / 6% / 4%** at gain tiers **<+15% / +15–24% / +25–49% / ≥+50%**. Day 1: peak =
-   entry, so the floor is 12% below entry; as the position rises, the floor ratchets up. No
-   averaging down, no waiting. Mechanics in `references/strategy.md` §0.3.
-4. **Always write a journal entry for the day, even with zero trades.** No-trade entries record:
-   what was scanned, candidates skipped, why.
-5. **Never trade when the US market is closed.** Check via the Robinhood MCP (or calendar
-   fallback: Mon–Fri 09:30–16:00 ET excluding NYSE holidays). No extended-hours orders.
+1. **Prefer limit orders.** Recommend a limit ~2% from the current price (buys: `ask × 1.02`;
+   sells: `bid × 0.98`). Use a market order only when a limit can't fill the intent (e.g. a
+   fractional-share dollar buy) or when the user explicitly asks for one.
+2. **Extended-hours trading is allowed.** Confirm the session state and pass the matching
+   `market_hours` value. Only block when the market is fully closed (no session at all).
+3. **Write a journal entry for any day the SOP does something.** No-trade scans record what was
+   looked at and why nothing was taken.
 
 ## Hard preconditions (verify in order, halt on failure)
 
@@ -53,103 +40,75 @@ Bright-line invariants. If any conflicts with a strategy score, the rule wins. F
    tell the user the MCP is unreachable and stop.
 2. **Account is the dedicated Agentic account** — not the user's primary individual account.
    Robinhood only permits agentic trading from dedicated Agentic accounts.
-3. **Market is open.** If closed, signal scans continue but no order tool may be invoked.
-4. **`config.toml` exists and parses.** Required: `mode`, `require_risk_review`. If missing,
-   create with paper defaults and tell the user. **In live mode, `require_risk_review` must be
-   `true`** — the SOP is fully autonomous (no human-in-the-loop confirmation), so the
-   risk-reviewer is the mandatory pre-trade gate. If `mode = "live"` and
+3. **Market session available.** If fully closed, scans continue but no order tool may fire.
+4. **`config/config.toml` exists and parses.** Required: `mode`, `require_risk_review`. If
+   missing, create with paper defaults and tell the user. **In live mode, `require_risk_review`
+   must be `true`** — the risk-reviewer is the pre-trade gate. If `mode = "live"` and
    `require_risk_review = false`, halt and tell the user.
-5. **SOP universe is reachable.** Pull the Robinhood watchlist named in
-   `config.toml::sop_universe_list_name` via the MCP (`get_watchlists` → match by `display_name`
-   → `get_watchlist_items`). If the named list does not exist, halt and tell the user. If
-   `discovery_mode = true`, skip this check (no universe filter).
+5. **SOP universe resolves (cache-first, never a halt).** Resolve the watchlist from
+   `data/watchlist.json` per the `strategy.md` §2 refresh policy: read the cache by default;
+   refresh from the MCP only on user request or when the cache is missing / >14 days old; on a
+   failed refresh, fall back to the cache and continue. The watchlist is a tracked/research list,
+   not a trade gate — never halt on it.
 6. **No kill switch.** If `KILL_SWITCH` exists at repo root, refuse to place orders (scans still
    allowed).
-7. **`trade-log.jsonl` is writable.** No order tool may be invoked unless it is.
+7. **`data/trade-log.jsonl` is writable.** No order tool may be invoked unless it is.
 
-## Daily SOP loop
+## Manual trading loop
 
 ```
-1. Pull the SOP universe (Robinhood list named in `config.toml::sop_universe_list_name`) via the
-   MCP; filter to equity instruments. Refresh quotes/OHLCV for each (Robinhood MCP; web/quote
-   fallback).
-2. Score each ticker against the three strategies (references/strategy.md §A:
-   trend-following, momentum/breakout, RSI mean-reversion). A ticker that fires ≥1 becomes a
-   candidate; tier = best firing score, with the §5 confluence upgrade if ≥2 fire.
-3. Run the 5-question Decision Framework per candidate (below). Any unsatisfactory answer →
-   skip the trade and log the reason.
-4. Emit a pre-trade review block per surviving candidate
-   (ticker | strategy | score | tier | qty | limit | max_loss).
-5. If require_risk_review = true: write proposals/{intent_id}.json + spawn the risk-reviewer
-   subagent (references/risk-review.md). Proceed only on "approve"; on "reject" log it and skip.
-6. Write the pending trade-log.jsonl line BEFORE any MCP order tool (strategy.md §6, §7).
-7. Execute by mode: paper → result "paper", no MCP call. live → place limit order (honoring
-   block_tickers), then log the result. No confirmation prompt — execution is autonomous.
-8. Scan all open positions for the §0.3 tiered trailing stop. Close on breach.
-9. Update journal/{YYYY-MM-DD}.md — mandatory even on zero-trade days (§0.4).
+1. Resolve the SOP universe from the local cache `data/watchlist.json` (a tracked/research list,
+   not a trade gate; refresh policy in strategy.md §2). Refresh quotes for the names of interest.
+2. The user decides what to buy or sell (a programmatic screener is a roadmap item). Apply the
+   Peter Lynch philosophy: let winners run, don't sell strength to fund losers.
+3. Emit a pre-trade review block per trade (ticker | side | type | qty | limit | account).
+4. If require_risk_review = true: write proposals/{intent_id}.json + spawn the risk-reviewer
+   subagent (references/risk-review.md). Proceed on "approve"; on "reject" in the autonomous
+   loop, log and skip — in stock-trader, surface it and let the user decide.
+5. Write the pending data/trade-log.jsonl line BEFORE any MCP order tool (strategy.md §4, §5).
+6. Execute by mode: paper → result "paper", no MCP call. live → place the order, then log the
+   result.
+7. On a buy fill, record/refresh the position in data/positions.jsonl (total qty + current P&L).
+8. Update journal/{YYYY-MM-DD}.md.
 ```
-
-## Decision Framework (answer all 5 in writing before every trade)
-
-1. **Current cash balance?** Read from the MCP. The trade must fit available cash and respect
-   `cash_reserve_pct` from `config.toml`.
-2. **What positions are already open?** Read from the MCP. Block if this ticker is at the 15%
-   per-position cap, or not in the SOP universe (unless `discovery_mode = true`).
-3. **Recent news?** Quick read (MCP or brief web search). Block on an active going-private,
-   bankruptcy, fraud, SEC enforcement, or accounting-restatement headline in the last 14 days.
-4. **What do the moving averages / RSI say?** This is also the strategy input — confirm the
-   firing strategy's read still holds at execution time.
-5. **Risk if the trade goes wrong?** State the day-1 worst-case dollar loss
-   (`qty × entry × 0.12`) — the 12% floor from the §0.3 trailing stop at peak = entry — and
-   confirm it's within the daily loss cap (`daily_loss_cap_pct`, default 2% of equity) after
-   any realized intraday losses.
 
 ## Load on demand
 
 | When you need… | Load |
 | --- | --- |
-| Strategies, sizing, exits, mode, kill switch, log schemas | `references/strategy.md` |
+| Order rules, mode, kill switch, log + position schemas | `references/strategy.md` |
 | When/how to spawn the risk-reviewer subagent | `references/risk-review.md` |
 | Robinhood MCP tool reference (signatures, defaults, gotchas) | `references/robinhood-mcp.md` |
-| Ticker → theme mapping for trade-log tagging and P&L analytics | `themes.toml` |
 
 Do not preload references unless the loop needs them.
 
-## Watchlist maintenance
+## Two logs + position state, all local
 
-Whenever the Agent WatchList is modified (tickers added or removed via `add_to_watchlist` /
-`remove_from_watchlist`), **update `themes.toml` in the same operation** — before the
-conversation ends. `themes.toml` is the canonical source of ticker → theme metadata and must
-stay in sync with the Robinhood list. The `theme` field in every `trade-log.jsonl` entry is
-populated from `themes.toml`; stale mappings corrupt theme-level P&L analytics.
-
-## Two logs, both mandatory
-
-- **`trade-log.jsonl`** (repo root, append-only, machine-readable) — one line per order state
-  transition, written **before** the MCP order tool fires. The single analytics source across
-  all days. Schema in `strategy.md` §7.1.
+- **`data/trade-log.jsonl`** (gitignored, append-only, machine-readable) — one line per order
+  state transition, written **before** the MCP order tool fires. The analytics source. Schema in
+  `strategy.md` §5.1.
+- **`data/positions.jsonl`** (gitignored, append-only) — total quantity + current P&L per open
+  position. Schema in `strategy.md` §5.3.
 - **`journal/{YYYY-MM-DD}.md`** (human-readable, one per day) — Portfolio Status → Market
-  Research → Trades Executed → Positions Closed → End-of-Day Reflection. Mandatory every trading
-  day, including no-trade days. Template in `strategy.md` §7.2.
+  Research → Trades Executed → Positions Closed → End-of-Day Reflection. Template in
+  `strategy.md` §5.2.
 
 ## Safety defaults (overridden only by explicit user instruction)
 
 - Default mode: **paper**.
-- Default side: **buy** only. Sells happen only via exit rules in `strategy.md` §4.2.
 - Default asset class: **US-listed common equity**. No options, crypto, OTC.
-- Default order type: **limit**, never market. No leverage, no shorting, no extended hours.
+- Default order type: **limit**. No leverage, no shorting.
 
 ## Stop conditions
 
-Halt new entries and tell the user when: the market is closed; the daily loss cap is breached;
-the MCP goes unreachable mid-loop; `KILL_SWITCH` appears; `config.toml` becomes unparseable; or
-the SOP universe list cannot be fetched from Robinhood.
+Halt and tell the user when: the market is fully closed and an order was requested; the MCP goes
+unreachable mid-loop; `KILL_SWITCH` appears; or `config/config.toml` becomes unparseable. (A
+failed watchlist refresh is **not** a halt — fall back to the `data/watchlist.json` cache, §2.)
 
 ## Reporting back
 
-After each loop, summarize in ≤5 lines: candidates surfaced (by tier) · orders placed (count +
-mode) · open positions touched (incl. any trailing-stop exits) · stop conditions hit · paths to
-today's `trade-log.jsonl` and `journal/{YYYY-MM-DD}.md`.
+After each loop, summarize in ≤5 lines: trades placed (count + mode) · positions touched · stop
+conditions hit · paths to `data/trade-log.jsonl` and today's `journal/{YYYY-MM-DD}.md`.
 
 ## Git practices (inherited)
 

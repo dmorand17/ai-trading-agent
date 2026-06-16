@@ -38,8 +38,8 @@ Does **not** return reliable buying power — route buying-power questions throu
 ### `get_equity_positions`
 - **args:** `account_number`, `cursor?`
 - Open equity positions for one account: symbol, quantity, average cost, per-position
-  hold breakdowns. Used by the SOP loop for the §0.3 trailing-stop sweep and §0.1 15%
-  per-position cap check.
+  hold breakdowns. Used to refresh `data/positions.jsonl` (total qty + current P&L) and to
+  resolve existing exposure before a trade.
 
 ## Market data
 
@@ -51,8 +51,8 @@ Does **not** return reliable buying power — route buying-power questions throu
 ### `get_equity_historicals`
 - **args:** `symbols[]` (≤ 10), `start_time` (RFC3339 UTC), `end_time?`, `interval?`,
   `bounds?`, `adjustment_type?`
-- OHLCV bars across an explicit time range. Used by the strategy scorers in
-  `strategy.md` §A for SMA / breakout / RSI computation.
+- OHLCV bars across an explicit time range. Useful for context on a ticker the user is
+  considering (a stock screener that consumes this is a roadmap item).
 - **Interval** is optional — when omitted, the server auto-picks an interval targeting
   ~250 bars and the per-call bar cap does not apply. Provide an explicit interval only
   when you need a specific granularity. The 1-minute bar is named `minute` (not
@@ -84,11 +84,11 @@ Does **not** return reliable buying power — route buying-power questions throu
 - `created_at_gte`: convert user-timezone relative times ("today", "this week") to UTC
   before sending.
 - `placed_agent='agentic'` filters to MCP-placed orders — handy for reconciling
-  `trade-log.jsonl` with what actually fired.
+  `data/trade-log.jsonl` with what actually fired.
 
 ## Orders — write (gated)
 
-These are the only tools that move money or cancel real orders. SOP §6 / §7 require a
+These are the only tools that move money or cancel real orders. SOP §4 / §5 require a
 proposal + risk-review + pending trade-log line **before** any of these fire.
 
 ### `review_equity_order`
@@ -109,8 +109,9 @@ proposal + risk-review + pending trade-log line **before** any of these fire.
     `stop_market`/`stop_limit`.
   - Fractional and dollar-based orders only place in `regular_hours`.
 - Account must be `agentic_allowed=true`.
-- **SOP override:** the SOP forbids market orders (CLAUDE.md non-negotiable #2). Always
-  use `type=limit` within 0.2% of the current ask.
+- **SOP default:** prefer `type=limit` ~2% from the current price (buys `ask × 1.02`, sells
+  `bid × 0.98`); use a market order only when a limit can't fill the intent (e.g. a
+  fractional-share dollar buy) or when the user explicitly asks (CLAUDE.md non-negotiable #1).
 
 ### `place_equity_order`
 - **args:** same as `review_equity_order` plus optional `ref_id` (UUID).
@@ -118,8 +119,8 @@ proposal + risk-review + pending trade-log line **before** any of these fire.
 - **Idempotency:** generate `ref_id` once per logical order; re-send on transient
   transport failures. New `ref_id` only when the user wants a new order. Omitting
   falls back to a server key (loses client↔gateway idempotency).
-- **SOP gates that must pass first:** mode/allowlist check, risk-reviewer approval,
-  pending `trade-log.jsonl` line written. See `strategy.md` §6.
+- **SOP gates that must pass first:** mode check, risk-reviewer approval, pending
+  `data/trade-log.jsonl` line written. See `strategy.md` §4.
 
 ### `cancel_equity_order`
 - **args:** `account_number`, `order_id`
@@ -192,24 +193,23 @@ Returns `list_id` values for `follow_watchlist`.
 
 ## Quick lookup — by SOP loop step
 
-| Loop step (`CLAUDE.md` §Daily SOP loop) | Tools |
+| Loop step (`CLAUDE.md` §Manual trading loop) | Tools |
 | --- | --- |
-| 1. Refresh quotes / OHLCV | `get_equity_quotes`, `get_equity_historicals` |
-| 1–2. Decision Q1 (cash) / Q2 (open positions) | `get_portfolio`, `get_equity_positions` |
-| 4. Pre-trade review block | `get_equity_tradability`, `review_equity_order` |
-| 7. Execute (live) | `place_equity_order` |
-| 8. Position sweep (§0.3 trailing stop) | `get_equity_positions`, `get_equity_quotes`, then `review_equity_order` → `place_equity_order` to close |
-| Order reconciliation / weekly review | `get_equity_orders` (filter `placed_agent='agentic'`) |
+| 1. Pull universe / refresh quotes | `get_watchlists`, `get_watchlist_items`, `get_equity_quotes` |
+| Account context (cash / open positions) | `get_portfolio`, `get_equity_positions` |
+| 3. Pre-trade review block | `get_equity_tradability`, `review_equity_order` |
+| 6. Execute (live) | `place_equity_order` |
+| 7. Refresh position state | `get_equity_positions`, `get_equity_quotes` |
+| Order reconciliation / portfolio review | `get_equity_orders` (filter `placed_agent='agentic'`) |
 | Watchlist maintenance | `get_watchlists`, `get_watchlist_items`, `add_to_watchlist`, `remove_from_watchlist` |
 
-## Tools NOT to use
+## Tools & defaults
 
-- **Market orders for exits** — always use `type=limit` at `bid × 0.998` for trailing-stop
-  and time-stop closes. Market exits are forbidden.
-- **Market orders for entries when a whole share fits** — if `floor(tier_$ / ask) ≥ 1`,
-  use `type=limit`. Market+`dollar_amount` is only for fractional entries where a whole
-  share would exceed the tier dollar amount.
-- **Extended hours** — SOP forbids extended-hours orders. Keep `market_hours` at
-  `regular_hours` (the default).
-- **Options & crypto write tools** — out of scope for the current SOP (US-listed
-  common equity only). Read-side tools are fine for context, but no orders.
+- **Prefer limit orders** (§0.1) — `type=limit` ~2% from the current price. Use `type=market`
+  only when a limit can't fill the intent (e.g. a fractional-share `dollar_amount` buy) or when
+  the user explicitly asks.
+- **Extended hours are allowed** (§0.2) — set `market_hours` to match the session
+  (`regular_hours` / `extended_hours` / `all_day_hours`). Note: fractional and dollar-based
+  orders only place in `regular_hours` (a Robinhood constraint).
+- **Options & crypto write tools** — out of scope (US-listed common equity only). Read-side
+  tools are fine for context, but no orders.

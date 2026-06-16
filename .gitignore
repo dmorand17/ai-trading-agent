@@ -23,6 +23,11 @@ node_modules/
 *.log
 .cache/
 
+# Local-only trade state — never committed (kept on this machine only)
+data/
+
 # SOP audit artifacts — ephemeral, gitignored per risk-review.md §3-4
 proposals/
 reviews/
+
+_archived/

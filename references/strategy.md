@@ -1,13 +1,15 @@
 # Trading Strategy & Rules
 
-The single authoritative reference for **what to buy, how to size it, when to exit, and the
-mandatory log schemas.** This file replaces the old signal-by-signal split — the trade ideas
-now come from a small set of classic, price-based strategies (§A), not from external cluster
-feeds.
+The single authoritative reference for **how trades are placed, how positions are tracked, and
+the mandatory log schemas.** This is a for-fun project running manually for now — the rules are
+deliberately light. `config/config.toml` is the runtime source of truth for execution mode and
+the universe-list pointer; the trading universe itself lives on Robinhood (pulled via the MCP).
 
-Everything here is tunable **except §0**. `config.toml` is the runtime source of truth for
-execution mode, cash reserve, and the universe-list pointer; the trading universe itself lives
-on Robinhood (pulled via the MCP). This file is the source of truth for strategy and sizing.
+This phase is **manual / human-in-the-loop**. The autonomous daily loop and a programmatic
+stock screener are roadmap items (see the README) — for now the user picks the trades and the
+agent executes them through the audit-trail gates below.
+
+Everything here is tunable **except §0**.
 
 ---
 
@@ -15,408 +17,169 @@ on Robinhood (pulled via the MCP). This file is the source of truth for strategy
 
 If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 
-### 0.1 Position cap: 15% per single position
+### 0.1 Prefer limit orders
 
-- **Universal cap: 15% of total portfolio value per single ticker.** Exposure =
-  `(open_qty × current_mark) / total_equity`. Includes pre-existing holdings. No per-symbol
-  overrides.
-- **Cash reserve interacts:** total deployed capital still respects `cash_reserve_pct` (§2.3) —
-  you cannot push cash below the reserve floor, even if the per-position cap would otherwise
-  allow it.
-- The invariant: a per-position cap of 15% and a cash-reserve floor are *always* enforced. The
-  SOP may never trade past them.
+- **Default to a limit order.** Recommend a limit price **~2% from the current price**:
+  - Buys: `limit_price = current_ask × 1.02` (rounded to a sensible tick).
+  - Sells: `limit_price = current_bid × 0.98`.
+- Use a **market order** only when a limit can't fill the intent — e.g. a fractional-share buy
+  sized by dollar amount (`dollar_amount` market order), or when the user explicitly asks for a
+  market order.
+- The ~2% figure is a starting recommendation, not a hard rule. The user may accept, tighten,
+  or widen it per trade.
 
-### 0.2 Order types: prefer limit; market only for fractional entries
+### 0.2 Extended-hours trading is allowed
 
-**Entries — choose based on whether a whole share fits:**
+- Orders may be placed during regular **or** extended hours. There is no regular-session-only
+  restriction.
+- Still confirm the market session state before placing (regular / pre-market / after-hours /
+  closed) and pass the matching `market_hours` value to the order tool. If the market is fully
+  closed (no session at all), do not place — tell the user.
 
-| Condition | Order type | Parameters |
-| --- | --- | --- |
-| `floor(tier_$ / ask) ≥ 1` — whole share fits | `type=limit` | `qty=floor(tier_$/ask)`, `limit_price=min(ask×1.002, SMA10×1.01)`, `time_in_force=gfd` |
-| `floor(tier_$ / ask) < 1` — stock too expensive | `type=market` | `dollar_amount=tier_$`, `market_hours=regular_hours` |
+### 0.3 Journal mandatory every day there is activity
 
-**Exits — always limit, no exceptions:**
-- `type=limit` at `current_bid × 0.998`, `time_in_force=gfd`.
-- Never `stop_market`, never `market-on-close`, never market for exits.
-
-**Spread filter:** skip any entry (limit or market) when `(ask − bid) / mid > 50 bps`.
-
-**SMA10 for limit pricing:** compute the 10-day SMA of closing prices from the same OHLCV data
-used for strategy scoring. If the resulting `limit_price` is below the current bid (i.e.
-`SMA10 × 1.01 < bid`), the order will likely not fill today — log it as a day order and
-re-evaluate next session if unfilled.
-
-### 0.3 Trailing stop: tiered band, close without waiting
-
-Single mark-based stop, in flight on every open position from day 1.
-
-- Track per open position: `peak_mark = max(entry_price, max mark observed since entry)` and
-  `gain_pct = (peak_mark − entry_price) / entry_price`.
-- The trailing band tightens as `gain_pct` rises:
-
-  | Position gain | Trailing band (drawdown from `peak_mark`) |
-  | --- | --- |
-  | < +15%       | 12% |
-  | +15% to +24% | 8% |
-  | +25% to +49% | 6% |
-  | ≥ +50%       | 4% |
-
-- On every loop: re-read `current_mark` → update `peak_mark` → recompute `gain_pct` → look up
-  band → if `current_mark ≤ peak_mark × (1 − band)`, submit a closing limit at
-  `current_bid × 0.998` **immediately**.
-- The band only ever tightens; `peak_mark` only rises. No averaging down, no "wait for the
-  bounce," no overriding by strategy score.
-- On day 1, `peak_mark = entry_price`, so the worst-case stop is **12% below entry**. As the
-  position rises, the floor ratchets up with `peak_mark`.
-- Mechanics (persistence, gap-through-stop, between-session triggers) in §4.3.
-
-### 0.4 Journal mandatory every day, even on no-trade days
-
-- A human-readable `journal/{YYYY-MM-DD}.md` must be created/updated on every SOP invocation,
-  **whether or not any orders were placed**. Template in §7.
-- On a no-trade day, write `None today.` under Trades Executed and still complete the other
-  sections. The reflection records *why* nothing fired — that's the tuning data.
-
-### 0.5 Never trade when the market is closed
-
-- Before any order tool fires, confirm the US regular session is open.
-- Source of truth: (1) Robinhood MCP market-status read; (2) calendar fallback Mon–Fri
-  09:30–16:00 America/New_York, excluding NYSE holidays.
-- If closed → signal scans and journal entries continue; **no orders**, including exits. A
-  trailing-stop exit (§0.3) that fires after close is queued for the next open and logged.
+- A human-readable `journal/{YYYY-MM-DD}.md` must be created/updated on every day the SOP runs
+  and does anything. Template in §5.2.
+- On a no-trade day where the user still ran a scan, write `None today.` under Trades Executed
+  and record what was looked at and why nothing was taken.
 
 ---
 
-## A. Strategy set (how candidates are generated)
+## 1. Mode handling (paper / live)
 
-The SOP evaluates each watchlist ticker against three classic, price-based strategies. Each
-strategy independently emits a **signal** (`fire` / `no`) and a **score** (0–100). Inputs are
-daily OHLCV and quotes pulled from the Robinhood MCP (or a brief web/quote read as fallback).
+The SOP reads `config/config.toml` **on every invocation, before any order tool is touched.**
+If the file is missing, create it with paper defaults and report to the user.
 
-A ticker becomes a **candidate** when at least one strategy fires. Its conviction tier comes
-from the best firing strategy's score (§3.1), with a confluence upgrade when more than one
-fires (§5).
-
-### A.1 Trend-following (the baseline strategy)
-
-Buy strength that is already trending; let the trend carry it.
-
-- **Inputs:** 20-day SMA, 50-day SMA, latest close.
-- **Fires when:** `close > SMA20 > SMA50` (constructive uptrend, fast above slow).
-- **Score:**
-  - Base 60 when the fire condition holds.
-  - `+15` if `SMA20` is rising vs 5 trading days ago.
-  - `+15` if `close` is within 4% of the 52-week high (trending toward new highs, not extended).
-  - `−20` if `close` is more than 12% above `SMA20` (overextended — chasing).
-  - Clamp to 0–100. Below 45 → treat as `no`.
-- **Disqualifier:** if `close < SMA20` AND `close < SMA50`, this strategy does not fire.
-
-### A.2 Momentum / breakout
-
-Buy a clean breakout above a recent base on expanding volume.
-
-- **Inputs:** prior 20-day high (excluding today), latest close, today's volume, 20-day average
-  volume.
-- **Fires when:** `close >= prior_20d_high` (new 20-day high) AND
-  `today_volume >= 1.5 × avg_20d_volume` (volume confirmation).
-- **Score:**
-  - Base 65 when the fire condition holds.
-  - `+15` if `today_volume >= 2 × avg_20d_volume` (strong confirmation).
-  - `+10` if the breakout clears the prior high by < 3% (early, not extended).
-  - `−15` if the close is > 8% above the prior 20-day high (chasing a gap).
-  - Clamp to 0–100. Below 50 → treat as `no`.
-
-### A.3 RSI mean-reversion
-
-Buy a temporary oversold dip *within* an established uptrend — never a falling knife.
-
-- **Inputs:** 14-day RSI, 50-day SMA, latest close.
-- **Fires when:** `RSI14 <= 35` (oversold) AND `close > SMA50` (still in a longer uptrend).
-- **Score:**
-  - Base 55 when the fire condition holds.
-  - `+20` if `RSI14 <= 25` (deeper oversold).
-  - `+15` if `close` is within 3% of `SMA50` (pullback to support, not a collapse).
-  - `−25` if `close < SMA50` (no uptrend → do not fire; enforced by the fire condition).
-  - Clamp to 0–100. Below 45 → treat as `no`.
-- **Caution:** mean-reversion entries get a tighter watch — the §0.3 trailing stop (12% from
-  entry on day 1) is the backstop if the "dip" keeps falling.
-
-### A.4 Tuning knobs
-
-The thresholds above are the defaults. Tune them here as the paper track record accumulates;
-the weekly review (`.claude/skills/weekly-review`) suggests changes.
-
-```toml
-[trend_following]
-min_score_to_trade = 45
-overextension_pct  = 0.12   # close this far above SMA20 → penalize
-
-[momentum_breakout]
-min_score_to_trade   = 50
-breakout_lookback    = 20    # trading days
-volume_confirm_mult  = 1.5   # today_volume ≥ this × avg_20d_volume
-
-[rsi_mean_reversion]
-min_score_to_trade = 45
-rsi_oversold       = 35
-rsi_deep_oversold  = 25
-rsi_period         = 14
-```
-
----
-
-## 1. Mode handling (paper → live transition)
-
-The SOP reads `config.toml` at repo root **on every invocation, before any order tool is
-touched.** If the file is missing, create it with paper defaults and report to the user.
-
-### 1.1 `config.toml` schema
+### 1.1 `config/config.toml` schema
 
 ```toml
 mode = "paper"                              # "paper" | "live"
-block_tickers = []                          # global blocklist, overrides everything
-daily_loss_cap_pct = 0.02                   # halt new entries when day P&L ≤ −this × equity
-cash_reserve_pct = 0.10                     # minimum cash floor as a fraction of equity
-sop_universe_list_name = "Agent WatchList"  # Robinhood watchlist used as the universe (display_name)
-discovery_mode = false                      # true = ignore the universe filter (paper-mode discovery)
+sop_universe_list_name = "Agent WatchList"  # Robinhood watchlist (display_name); cached to data/watchlist.json (§2)
 require_risk_review = true                  # risk-reviewer subagent gates every order; MANDATORY in live
 ```
 
 ### 1.2 Paper mode (default)
 
-- All strategy scans and pre-trade review blocks run normally.
+- All pre-trade review blocks run normally.
 - **No MCP order tool is invoked.**
-- `trade-log.jsonl` entries are appended with `mode: "paper"` and `result: "paper"`.
+- `data/trade-log.jsonl` entries are appended with `mode: "paper"` and `result: "paper"`.
 
 ### 1.3 Live mode
 
-Live mode is **fully autonomous** — there is no human-in-the-loop confirmation prompt.
-`require_risk_review = true` is therefore **mandatory in live mode**: the risk-reviewer subagent
-is the sole pre-trade gate. If `mode = "live"` and `require_risk_review = false`, the SOP halts
-and refuses to place orders.
+Live mode places real orders. `require_risk_review = true` is **mandatory in live mode**: the
+risk-reviewer subagent is the pre-trade gate. If `mode = "live"` and `require_risk_review =
+false`, the SOP halts and refuses to place orders.
 
-Pre-flight on every order: `tools/list` returns Robinhood order tools; the MCP account ID
-matches the user-confirmed **Agentic** account (never the primary individual account); ticker not
-in `block_tickers`; risk caps (§3) not breached; no `KILL_SWITCH`; `trade-log.jsonl` writable;
-the risk-reviewer returned `approve`.
-
-### 1.4 Staged transition
-
-Paper ≥ 30 trading days (with the risk-reviewer active) → live with the full block_tickers /
-risk-cap / cash-reserve / risk-reviewer stack. Use `block_tickers` to constrain the live surface
-during the first weeks. Rollback is always: edit `config.toml`, save, next invocation honors it.
+Pre-flight on every order: `tools/list` returns Robinhood order tools; the MCP account is the
+user-confirmed **Agentic** account (never the primary individual account); no `KILL_SWITCH`;
+`data/trade-log.jsonl` writable; the risk-reviewer returned `approve`.
 
 ---
 
-## 2. Universe & cash reserve
+## 2. Universe (a tracked/research list, cached locally — not a trade gate)
 
-The trading universe lives on Robinhood; the cash reserve lives in `config.toml`.
+The universe is the Robinhood watchlist whose `display_name` equals
+`config/config.toml::sop_universe_list_name`. It is a **tracked list and research seed**, cached
+locally to `data/watchlist.json` (§5.4). **It does not gate trades** — the `stock-trader` skill
+may trade any ticker, on the list or not.
 
-### 2.1 Universe source
+**Refresh policy (cache-first — this is the canonical definition; other files reference it):**
 
-- The SOP universe is the Robinhood watchlist whose `display_name` equals
-  `config.toml::sop_universe_list_name`. The SOP pulls it fresh each invocation via
-  `get_watchlists` (match by name → resolve to `list_id`) and `get_watchlist_items`.
-- **Filter to equity only.** Drop items whose `object_type ≠ "instrument"` (crypto pairs,
-  indexes, futures). The SOP only trades US-listed common equity.
-- The SOP **never writes** to the Robinhood watchlist. Add/remove names via the Robinhood app
-  (or `add_to_watchlist` / `remove_from_watchlist` only with explicit user confirmation in chat).
-- If the named list cannot be found, halt (precondition #5 in `CLAUDE.md`) and tell the user.
-
-### 2.2 Universe filter
-
-- **Default (`discovery_mode = false`):** no order for a ticker outside the universe.
-  Off-universe names that score are still logged in Market Research with
-  `Decision: Skipped — not on universe list`.
-- **`discovery_mode = true`:** no universe filter. Score whatever the SOP encounters. Paper
-  mode only — do not flip this on in live.
-
-### 2.3 Cash reserve
-
-- Source: `config.toml::cash_reserve_pct` (fraction of equity, e.g. `0.10`).
-- Compute `deployed_pct = (total_equity − cash_balance) / total_equity` each loop.
-- A new buy may not push `deployed_pct` above `1 − cash_reserve_pct`.
-- Example: `equity = $20,000`, `cash_reserve_pct = 0.10` → deploy ≤ $18,000, keep ≥ $2,000
-  cash. If a candidate buy would breach the floor, reduce `qty` to fit; never below the §3.1
-  minimum.
-
-### 2.4 Investment themes
-
-The Agent WatchList is organized around five high-conviction secular themes. The canonical
-ticker list lives on Robinhood (display_name `"Agent WatchList"`); manage it there, not here.
-
-| Theme | Angle |
-| --- | --- |
-| **Nuclear** | Power operators, uranium supply chain, components and defense reactors |
-| **Robotics** | Surgical, industrial, collaborative, and software automation |
-| **Space** | Launch vehicles, satellite broadband, defense/anchor primes, lunar |
-| **AI** | GPU compute, chip architecture, enterprise analytics, AI networking |
-| **Data Centers / AI Infrastructure** | Colocation REITs, power and cooling, server hardware, GPU cloud |
-| **Cybersecurity** | Endpoint, network, and identity security protecting AI/data center infrastructure |
-| **Semiconductors** | Fab equipment, memory, advanced packaging — picks-and-shovels for all other themes |
-| **Quantum Computing** | Gate-based and annealing quantum hardware and software; early-stage, lower liquidity |
-| **Defense Tech** | Autonomous systems, drones, hypersonics, defense AI; geopolitical cycle beneficiary |
-| **Clean Energy** | Solar, wind, fuel cells, grid infrastructure powering data centers and electrification |
-| **Biotech / AI Drug Discovery** | Generative AI applied to drug pipelines, genomics, gene editing |
+- **Read the cache by default.** Resolve the universe from `data/watchlist.json`; make **no** MCP
+  watchlist call on a normal run.
+- **Refresh from the MCP only when** (a) the user explicitly asks to refresh, **or** (b) the cache
+  is missing or its `fetched_at_utc` is **older than 14 days**. To refresh: `get_watchlists`
+  (match by name → `list_id`) → `get_watchlist_items`, **filter to equity** (drop items whose
+  `object_type ≠ "instrument"` — crypto pairs, indexes, futures), then rewrite
+  `data/watchlist.json` with a fresh `fetched_at_utc`.
+- **On a failed refresh:** fall back to the existing cache, note staleness, and continue — do not
+  halt. (Compare `fetched_at_utc` to the current date the session already knows; no clock call.)
 
 ---
 
-## 3. Position sizing & risk caps
+## 3. Trading rules (how candidates are chosen)
 
-Driven by the conviction tier from §A scoring.
+> **User-defined for now.** The user picks what to buy and sell. A programmatic stock screener
+> that surfaces candidates automatically is a roadmap item (see the README). Until then, this
+> section is the user's discretion plus the philosophy below.
 
-### 3.1 Tier → target size
+### 3.1 Trading philosophy — Peter Lynch, "let your winners run"
 
-| Tier | Score | Position size (% of equity) |
-| --- | --- | --- |
-| skip | < min_score_to_trade | 0% (no trade) |
-| low | min–64 | 5% |
-| medium | 65–79 | 8% |
-| high | 80–100 | 12% |
+The guiding style is Peter Lynch's:
 
-`dollar_amount = equity × tier_pct`, then **clamp downward** so that:
-- `dollar_amount / total_equity + existing_exposure_pct ≤ 0.15` (§0.1 position cap)
-- `deployed_pct + dollar_amount / total_equity ≤ 1 − cash_reserve_pct` (§2.3 floor)
+- **Let your winners run.** Do not trim a position just because it's up. The biggest gains come
+  from holding the rare multi-bagger through the noise.
+- **Don't pull the flowers and water the weeds.** Lynch's warning: don't sell your winning
+  stocks to add to your losers. It only takes a handful of massive winners to make a lifetime of
+  investing successful — protect them.
+- Bias toward holding conviction positions; be slow to sell strength and quick to question a
+  thesis that's deteriorating.
 
-For whole-share entries: `qty = floor(dollar_amount / ask)`. If `qty ≥ 1`, use limit order.
-If `qty < 1`, use market+dollar_amount (fractional). If `dollar_amount < $1.00` after clamping,
-skip and log `Decision: Skipped — sizing collapsed below $1 (reserve or position cap)`.
-
-### 3.2 Hard caps
-
-- **Per-ticker:** total exposure ≤ 15% of equity (§0.1). A new buy may not push past.
-- **Cash-reserve floor:** total deployed ≤ `(1 − cash_reserve_pct) × equity` (§2.3).
-- **Daily loss cap:** if realized + unrealized day P&L ≤ `−daily_loss_cap_pct × equity` (default
-  −2%), halt new entries for 24h. Existing positions and their exits keep running.
-- **Minimum order size:** $1.00. Below this, skip — Robinhood rejects sub-dollar fractional orders.
-
-### 3.3 Liquidity floor
-
-Skip any ticker with 20-day average daily dollar volume < $5M.
+Concrete entry/exit rules (e.g. a defined trailing stop, time stop, or rebalancing logic) are
+**deferred** — see the README roadmap. For now exits are user-directed.
 
 ---
 
-## 4. Entry & exit rules
+## 4. Order placement procedure
 
-### 4.1 Entry
-
-- Apply the §0.2 order-type decision: limit for whole shares, market+dollar_amount for fractional.
-- **Spread filter:** skip when `(ask − bid) / mid > 50 bps` — applies to both order types.
-- For fractional market fills, record `qty` post-fill from the MCP response (up to 6 decimals).
-- **One entry per signal:** do not split into child orders.
-
-### 4.2 Exits (this is how positions close — strategies never produce sells)
-
-The §0.3 trailing stop and the time stop are always in flight. Whichever fires first wins.
-
-| Exit reason | Trigger | Action |
-| --- | --- | --- |
-| Trailing stop | drawdown from `peak_mark` ≥ tier band (§0.3) | close 100% at `bid × 0.998`, no waiting |
-| Time stop | 30 trading days held | close 100% at `bid × 0.998` |
-| Kill switch | `KILL_SWITCH` appears | freeze new entries; existing exits continue |
-
-### 4.3 Trailing-stop mechanics
-
-The trailing rule and band table live in §0.3. This section covers the supporting mechanics.
-
-- **State persistence:** write `peak_mark` per open position to `positions.jsonl` (one record
-  per `ticker × entry_intent_id`) so trailing state survives across runs. Schema:
-  `{ticker, entry_intent_id, entry_price, qty, peak_mark, last_updated_utc}`. Append-only;
-  reconstruct state by taking the latest line per `(ticker, entry_intent_id)`.
-- **Loop tick:** on every SOP invocation, for each open position — re-read `current_mark`,
-  update `peak_mark = max(peak_mark, current_mark)`, look up the band from the §0.3 table by
-  `gain_pct = (peak_mark − entry_price) / entry_price`, check
-  `current_mark ≤ peak_mark × (1 − band)`.
-- **Gap-through-stop:** if the position opens through the stop, exit immediately at the open
-  via a limit at `current_bid × 0.998`; do not wait for a retest.
-- **Between sessions:** a stop trigger observed when the market is closed queues the close
-  for the next open (§0.5). Log the queued exit immediately; submit at the open.
-
-### 4.4 Cooldown
-
-After fully exiting a ticker, **10 trading days** before re-entry.
-
----
-
-## 5. Confluence bonus
-
-> When **two or more** strategies (§A) fire on the same ticker on the same day, upgrade
-> conviction by **one tier** (capped at `high`).
-
-Record the contributing strategies in `signal_source`, e.g. `"trend+breakout"`. A single firing
-strategy records just its own name (`"trend"`, `"breakout"`, `"rsi_revert"`).
-
-Example: trend-following medium (score 70) + RSI mean-reversion low (score 48), same ticker →
-take `max(tiers) = medium`, upgrade once → **high**.
-
----
-
-## 6. Order placement procedure
-
-For each candidate that survives all gates:
+For each trade the user directs:
 
 1. Compose the pre-trade review block:
-   `ticker=ACME strategy=trend+breakout score=78 tier=high dollar_amount=$24.00 max_loss=$2.88 account=Agentic-…XYZ`
+   `ticker=ACME side=buy type=limit qty=… limit_price=… account=Agentic-…XYZ`
 2. **If `require_risk_review = true`:** write `proposals/{intent_id}.json`, spawn the
    `risk-reviewer` subagent, wait for its JSON decision, write `reviews/{intent_id}.json`. On
-   `reject`, skip steps 3–5: append one `trade-log.jsonl` line with
-   `result: "rejected_by_risk_review"` and `rejection_reasons: [...]`, go to step 6. See
+   `reject` in the autonomous loop, skip and log `result: "rejected_by_risk_review"`. In
+   `stock-trader` (human-in-the-loop), surface the rejection and let the user decide. See
    `references/risk-review.md`.
-3. **Append a pending entry to `trade-log.jsonl`** (§7) with `result: "pending"`.
+3. **Append a pending entry to `data/trade-log.jsonl`** (§5) with `result: "pending"`.
 4. If `mode = "paper"`: re-append a line with the same `intent_id` and `result: "paper"`.
-5. If `mode = "live"`: invoke the Robinhood MCP order tool (limit, day, equity, buy) — no
-   confirmation prompt, execution is autonomous after the risk-reviewer `approve`; append a
-   closing entry with `result: "submitted"`/`"rejected"`/`"error"` and the `mcp_response`.
+5. If `mode = "live"`: invoke the Robinhood MCP order tool; append a closing entry with
+   `result: "submitted"`/`"filled"`/`"rejected"`/`"error"` and the `mcp_response`.
 6. Update `journal/{YYYY-MM-DD}.md` either way.
+7. On a buy fill, record/refresh the position in `data/positions.jsonl` (§5.3).
 
 **The trade-log line must be written before the MCP order tool is invoked.** This is the SOP's
 core auditability guarantee.
 
 ---
 
-## 7. Logs — two artifacts, both mandatory
+## 5. Logs & state — three artifacts
 
-### 7.1 `trade-log.jsonl` (repo root, append-only, machine-readable, single analytics source)
+### 5.1 `data/trade-log.jsonl` (append-only, machine-readable, single analytics source)
 
-One JSON object per line. Written **before** the MCP order tool fires.
+One JSON object per line. Written **before** the MCP order tool fires. Gitignored — kept local.
 
 ```json
 {
-  "intent_id": "2026-06-12T14:03:21Z-ACME-trend",
+  "intent_id": "2026-06-12T14:03:21Z-ACME-buy",
   "timestamp_utc": "2026-06-12T14:03:21Z",
   "mode": "live",
-  "signal_source": "trend+breakout",
   "ticker": "ACME",
   "side": "buy",
-  "dollar_amount": 24.00,
-  "qty": 0.057423,
-  "limit_price": null,
-  "conviction_tier": "high",
-  "conviction_score": 78,
-  "theme": "ai",
+  "order_type": "limit",
+  "dollar_amount": null,
+  "qty": 5,
+  "limit_price": 42.25,
   "account_id_masked": "…XYZ",
-  "mcp_tool_called": "robinhood.place_limit_order",
-  "mcp_response": { "order_id": "abc-123", "status": "queued", "raw": "<full payload>" },
-  "result": "submitted",
+  "mcp_tool_called": "place_equity_order",
+  "mcp_response": { "order_id": "abc-123", "state": "filled", "raw": "<full payload>" },
+  "result": "filled",
   "error_msg": null,
-  "rules_version": "2026-06-15"
+  "rules_version": "2026-06-16"
 }
 ```
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `intent_id` | yes | Unique. Format `{ISO_TS}-{TICKER}-{strategy}`. Re-used across the pending/closed pair. |
+| `intent_id` | yes | Unique. Format `{ISO_TS}-{TICKER}-{side}`. Re-used across the pending/closed pair. |
 | `timestamp_utc` | yes | ISO 8601, UTC. |
 | `mode` | yes | `"paper"` / `"live"`. |
-| `signal_source` | yes | Firing strategy or `+`-joined combo, e.g. `"trend"`, `"breakout"`, `"trend+rsi_revert"`. |
 | `ticker` | yes | Uppercase US-listed symbol. |
-| `side` | yes | `"buy"` for entries; `"sell"` for exits. |
-| `dollar_amount` | entries | Set when using market+fractional (§0.2); null for limit entries and exits. |
+| `side` | yes | `"buy"` or `"sell"`. |
+| `order_type` | yes | `"limit"` or `"market"`. |
+| `dollar_amount` | market+fractional | Set for dollar-sized market orders; null otherwise. |
 | `qty` | yes | Whole or fractional shares (up to 6 decimals). For market entries, populated post-fill from MCP response. |
-| `limit_price` | exits + limit entries | The limit sent to the MCP; null for market entries. |
-| `conviction_tier` | yes | `low` / `medium` / `high`. |
-| `conviction_score` | yes | 0–100 from §A. |
-| `theme` | yes | Theme key from `themes.toml` (e.g. `"ai"`, `"nuclear"`). Look up by ticker at log time. |
+| `limit_price` | limit orders | The limit sent to the MCP; null for market orders. |
 | `account_id_masked` | yes | Last 4 chars of the Agentic account id. Never log the full id. |
 | `mcp_tool_called` | live only | Robinhood tool invoked. |
 | `mcp_response` | live only | Full structured response incl. broker order id. |
@@ -425,90 +188,135 @@ One JSON object per line. Written **before** the MCP order tool fires.
 | `error_msg` | optional | Set on `rejected`/`error`. |
 | `rules_version` | yes | Date of this file that produced the decision. |
 
+**Sell-only analytics fields** (added when a sell fills): `entry_intent_id`, `realized_pnl_usd`,
+`realized_return_pct`, `holding_period_days`.
+
 **Append-only:** never overwrite; re-append a line with the same `intent_id` per state
 transition (`pending → submitted → filled`). Reconstruct state by taking the latest line per
 `intent_id`.
-
-**Sell-only analytics fields** (added when a sell fills): `entry_intent_id`, `realized_pnl_usd`,
-`realized_return_pct`, `holding_period_days`, `exit_reason` (one of `trailing_stop`,
-`time_stop`, `manual`).
 
 Quick recipes:
 
 ```bash
 # latest state per intent
-jq -s 'group_by(.intent_id) | map(max_by(.timestamp_utc))' trade-log.jsonl
-# realized P&L by strategy
-jq -s '[.[] | select(.side=="sell" and .result=="filled")] | group_by(.signal_source)
-       | map({src: .[0].signal_source, pnl: ([.[].realized_pnl_usd] | add)})' trade-log.jsonl
+jq -s 'group_by(.intent_id) | map(max_by(.timestamp_utc))' data/trade-log.jsonl
+# realized P&L on closed sells
+jq -s '[.[] | select(.side=="sell" and .result=="filled")] | map(.realized_pnl_usd) | add' data/trade-log.jsonl
 ```
 
-### 7.2 `journal/{YYYY-MM-DD}.md` (human-facing, one file per day, mandatory — §0.4)
+### 5.2 `journal/{YYYY-MM-DD}.md` (human-facing, one file per day, mandatory — §0.3)
 
 ```markdown
 # Trade Journal — {YYYY-MM-DD}
 
 ## Portfolio Status
 - Cash: ${cash_balance}
-- Positions: {ticker} ({qty} shares @ ${avg_entry}), ...
+- Positions: {ticker} ({qty} shares @ ${avg_entry}, {unrealized P&L}), ...
 - Total Value: ${total_equity}
-- Mode: {paper|live}    Market: {open|closed}
+- Mode: {paper|live}    Session: {regular|pre-market|after-hours|closed}
 
 ## Market Research
-### {TICKER}
-- 20-day SMA: ${ma20} | 50-day SMA: ${ma50} | RSI14: {rsi} — {trend read} {commentary}
-- Strategies: trend={tier or "—"}, breakout={tier or "—"}, rsi_revert={tier or "—"}, combined={tier or "—"}
-- News: {one-line headline summary + source}
-- Decision: {Entered / Held / Skipped — one-line reason}
-
-(repeat per candidate considered)
+{Keep it concise — a brief, not an analyst report.}
+- Catalysts: 3–6 bullets (each one line + source), limited to held or watchlist names.
+- Today's idea(s): at most 1–2 short notes — ticker · why · indicative size.
+{No full-universe scoring table and no multi-paragraph candidate deep-dives in the journal. If a
+programmatic score is ever produced, its table belongs in a gitignored `data/` file, not here.
+Don't add a separate "Draft Trade Ideas" section — fold ideas into this one. Target ~30–40 lines
+for the whole journal.}
 
 ## Trades Executed
 | Time  | Symbol | Action | Qty | Price   | Reasoning |
 |-------|--------|--------|-----|---------|-----------|
-| 10:03 | NVDA   | BUY    | 5   | $847.50 | trend medium + breakout + cash OK |
+| 10:03 | NVDA   | BUY    | 5   | $847.50 | user-directed; trend intact |
 
 (If no trades: `None today.`)
 
 ## Positions Closed
-| Time  | Symbol | Reason             | Qty | Entry   | Exit    | P&L    |
-|-------|--------|--------------------|-----|---------|---------|--------|
-| 14:22 | TSLA   | trailing stop §0.3 | 10  | $215.00 | $189.20 | −$258  |
+| Time  | Symbol | Reason | Qty | Entry   | Exit    | P&L    |
+|-------|--------|--------|-----|---------|---------|--------|
+| 14:22 | TSLA   | user sell | 10 | $215.00 | $189.20 | −$258  |
 
 (If none: `None today.`)
 
 ## End-of-Day Reflection
-{2–4 sentences. What worked, what didn't, what to watch tomorrow. On no-trade days: why
-nothing fired and what would change that.}
+{2–4 sentences. What worked, what didn't, what to watch tomorrow.}
 ```
 
-Required sections, in order: Portfolio Status, Market Research (one subsection per candidate
-considered, not just traded), Trades Executed, Positions Closed, End-of-Day Reflection. Created
-at the first SOP run of the day; reflection written at the last run or by 16:30 ET.
+### 5.3 `data/positions.jsonl` (append-only, local position state)
+
+Tracks each open position's **total quantity** (aggregated across multiple buys) and **current
+unrealized P&L**. Gitignored — kept local. One record per update; reconstruct state by taking
+the latest line per `ticker`.
+
+```json
+{
+  "ticker": "AMD",
+  "total_qty": 0.153058,
+  "avg_entry_price": 548.81,
+  "current_mark": 561.20,
+  "unrealized_pnl_usd": 1.90,
+  "unrealized_pnl_pct": 2.26,
+  "last_updated_utc": "2026-06-16T19:37:30Z"
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `ticker` | Uppercase symbol. |
+| `total_qty` | Sum of all open share lots (whole or fractional, up to 6 decimals). |
+| `avg_entry_price` | Cost-basis-weighted average entry across all open lots. |
+| `current_mark` | Latest observed mark at update time. |
+| `unrealized_pnl_usd` | `(current_mark − avg_entry_price) × total_qty`. |
+| `unrealized_pnl_pct` | `(current_mark − avg_entry_price) / avg_entry_price × 100`. |
+| `last_updated_utc` | ISO 8601, UTC. |
+
+On a buy fill: recompute `total_qty` and `avg_entry_price` and append a new line. On a full
+sell: append a line with `total_qty: 0` (closed). On a partial sell: reduce `total_qty`,
+keep `avg_entry_price`.
+
+### 5.4 `data/watchlist.json` (local cache of the Robinhood universe)
+
+The locally-cached copy of the SOP universe (§2). Gitignored — kept local. Single JSON object,
+overwritten on each refresh. The cache is the default source; refresh policy is in §2.
+
+```json
+{
+  "list_name": "Agent WatchList",
+  "fetched_at_utc": "2026-06-16T13:00:00Z",
+  "symbols": ["AMD", "NVDA", "CRWD", "..."]
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `list_name` | The `display_name` matched against `config/config.toml::sop_universe_list_name`. |
+| `fetched_at_utc` | ISO 8601, UTC. Drives the 14-day staleness check (§2). |
+| `symbols` | Uppercase equity tickers (post equity-filter). |
+
+Written by `market-research` on a refresh, and by `stock-trader` (local append + `fetched_at_utc`
+bump) when it adds a bought ticker via `add_to_watchlist`.
 
 ---
 
-## 8. Kill switch
+## 6. Kill switch
 
-A file named `KILL_SWITCH` at repo root (any contents) means: no new entries; no new
-signal-driven sells; existing protective exits (trailing stop, time stop) **still run**; signal
-scans still write the journal. Delete the file to re-enable; log the event.
-
----
-
-## 9. Stop conditions (SOP-level halts)
-
-Halt the loop and report to the user when: `config.toml` is missing or unparseable; the SOP
-universe list cannot be fetched from Robinhood (named list not found, or the watchlist call
-fails twice in a row); Robinhood MCP `tools/list` fails twice in a row; the connected account
-is not the Agentic account; `trade-log.jsonl` is unwritable; the daily loss cap was breached
-< 24h ago; US regular session is closed (signal scans still run; ordering halts per §0.5).
+A file named `KILL_SWITCH` at repo root (any contents) means: no new orders. Signal scans and
+journal entries still run. Delete the file to re-enable; log the event.
 
 ---
 
-## 10. Versioning
+## 7. Stop conditions (SOP-level halts)
+
+Halt and report to the user when: `config/config.toml` is missing or unparseable; Robinhood MCP
+`tools/list` fails twice in a row;
+the connected account is not the Agentic account; `data/trade-log.jsonl` is unwritable; the
+market is fully closed (no session available) and an order was requested.
+
+---
+
+## 8. Versioning
 
 - Every trade-log entry stamps `rules_version` (this file's effective date).
 - After editing this file, bump `rules_version` to today's date in the next run.
-- Never edit `trade-log.jsonl` retroactively — append corrections as new lines. Never edit a
-  prior day's journal — append an `Addendum` section.
+- Never edit `data/trade-log.jsonl` retroactively — append corrections as new lines. Never edit
+  a prior day's journal — append an `Addendum` section.
