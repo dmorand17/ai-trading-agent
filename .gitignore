@@ -22,3 +22,7 @@ node_modules/
 # Logs and caches
 *.log
 .cache/
+
+# SOP audit artifacts — ephemeral, gitignored per risk-review.md §3-4
+proposals/
+reviews/

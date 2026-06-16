@@ -23,7 +23,10 @@ its own sake. Every strategy, sizing, and exit rule serves that goal.
 Engage the SOP when the user asks to: run the SOP / scan for trade ideas / "what should I trade
 today"; place a trade or review the trade log; or on a scheduled daily cadence. The phase skills
 in `.claude/skills/` (`pre-market`, `market-open`, `daily-summary`, `weekly-review`) are
-phase-specific entry points that all defer to this file and `references/strategy.md`.
+phase-specific entry points that all defer to this file and `references/strategy.md`. The
+`adhoc-trader` skill is the on-demand, human-in-the-loop entry point for a user-directed trade
+("buy 10 NVDA now") — same audit-trail gates, but the user picks ticker/side/order type and may
+override a risk-review reject.
 
 ## Non-negotiable rules (apply always, override everything)
 

@@ -33,9 +33,3 @@ tickers = ["IONQ", "QBTS", "RGTI"]
 
 [defense_tech]
 tickers = ["RTX", "NOC", "KTOS", "AXON"]
-
-[clean_energy]
-tickers = ["FSLR", "ENPH", "NEE", "BE"]
-
-[biotech]
-tickers = ["RXRX", "CRSP", "MRNA", "ILMN"]
