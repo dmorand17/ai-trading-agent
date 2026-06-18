@@ -4,7 +4,7 @@
 > currently run **manually** — the user picks the trades. These prompts are kept as a draft for
 > the autonomous phase and assume an automated candidate source (the planned stock screener)
 > rather than the manual loop. Revisit once the screener and defined exit rules are validated in
-> paper mode. The paths below (`config/config.toml`, `data/trade-log.jsonl`,
+> paper mode. The paths below (`config.toml`, `data/trade-log.jsonl`,
 > `data/positions.jsonl`) match the current layout.
 
 Ready-to-paste instruction sets for running the SOP phase skills as scheduled
@@ -85,9 +85,10 @@ cloud session. There is no human to confirm anything.
    everything. This phase runs BEFORE the open — the market is closed, so you MUST NOT invoke any
    Robinhood order tool.
 2. Execute the .claude/skills/market-research/SKILL.md instructions end to end: verify preconditions
-   (config/config.toml parses, no KILL_SWITCH); resolve the SOP universe from the cache
+   (config.toml parses, no KILL_SWITCH); resolve the SOP universe from the cache
    data/watchlist.json per strategy.md §2 (a fresh cloud clone has no data/, so the cache is
-   missing → refresh once from the Robinhood connector; otherwise refresh only if >14 days old);
+   missing → refresh once from the Robinhood connector; otherwise read the cache — the weekly
+   portfolio-review handles the standing refresh);
    read the Robinhood balance + open positions; web-search today's catalysts
    (earnings, economic data with ET release times, sector momentum, geopolitics); surface
    anything notable on held or watchlist names; and write everything to journal/{YYYY-MM-DD}.md
@@ -115,7 +116,7 @@ the journal path.
 - **Trigger:** Schedule
 
 > ⚠️ This is the only phase that can place orders. It places **real orders only when
-> `config/config.toml::mode = "live"`**; in `paper` mode it logs `result: "paper"` and calls no order
+> `config.toml::mode = "live"`**; in `paper` mode it logs `result: "paper"` and calls no order
 > tool. Confirm `mode` is what you intend before enabling this routine, and in live mode confirm
 > `require_risk_review = true` (the SOP halts otherwise).
 >
@@ -135,7 +136,7 @@ risk-reviewer subagent is the pre-trade gate (skip on reject; do NOT ask).
    everything (limit orders preferred, market only when a limit can't fill the intent;
    extended hours allowed; journal every active day).
 2. Verify ALL hard preconditions in CLAUDE.md in order — MCP/Robinhood connector reachable,
-   account is the dedicated Agentic account, market session available, config/config.toml valid,
+   account is the dedicated Agentic account, market session available, config.toml valid,
    no KILL_SWITCH, data/trade-log.jsonl writable. HALT with a written reason on any failure; do
    not trade on a partial check. (The watchlist resolves from the cache per strategy.md §2 — not
    a halt condition.)
@@ -163,8 +164,8 @@ and the data/trade-log.jsonl + journal paths.
 - **Name:** `SOP — Portfolio review`
 - **Model:** Sonnet — read-only analytics, lessons, and *suggested* tuning. No orders, no live
   decisions.
-- **Schedule (cron, America/New_York):** `0 16 1 * *` — 16:00 ET on the 1st of each month, after
-  the close. (Or run on-demand; this is a low-trade-frequency account.)
+- **Schedule (cron, America/New_York):** `30 17 * * 5` — 17:30 ET each Friday, after the week's
+  close. (Or run on-demand; this is a low-trade-frequency account.)
 - **Trigger:** Schedule
 
 **Prompt:**
@@ -175,8 +176,9 @@ session. This phase is READ-ONLY over trade data — it never places orders and 
 data/trade-log.jsonl or the daily journals.
 
 1. Read ./CLAUDE.md and ./references/strategy.md for context.
-2. Execute .claude/skills/portfolio-review/SKILL.md end to end: snapshot current holdings from
-   data/positions.jsonl and refresh each one's unrealized P&L against a live quote; compute the
+2. Execute .claude/skills/portfolio-review/SKILL.md end to end: force-refresh the watchlist cache
+   data/watchlist.json from the Robinhood connector (strategy.md §2); snapshot current holdings
+   from data/positions.jsonl and refresh each one's unrealized P&L against a live quote; compute the
    account's total return (realized + unrealized) since inception and compare against SPY over the
    same window — the goal is to beat the S&P 500, and this is measurable even with zero closed
    trades; report realized P&L + win rate from data/trade-log.jsonl when trades have closed (say
@@ -199,7 +201,7 @@ journal/portfolio-review.md path.
 
 1. Add the **Robinhood MCP as a connector** on claude.ai and confirm it authenticates.
 2. Set `NTFY_TOKEN` (and Robinhood secrets) as **env vars** on the routine environment.
-3. Confirm `config/config.toml::mode` — start with `paper` to validate the full chain end to end before
+3. Confirm `config.toml::mode` — start with `paper` to validate the full chain end to end before
    flipping `stock-trader` to `live`.
 4. Create the three routines with the prompts + crons above; enable **unrestricted branch pushes**
    on each.

@@ -1,6 +1,6 @@
 # Risk Review (Two-Agent Pattern)
 
-When `require_risk_review = true` in `config/config.toml`, the Trader (main session following
+When `require_risk_review = true` in `config.toml`, the Trader (main session following
 `CLAUDE.md`) **must** spawn the `risk-reviewer` subagent on every candidate trade and only invoke
 the Robinhood MCP order tool after an `approve` decision.
 
@@ -13,7 +13,7 @@ A single agent that both picks and places the order tends to confirm its own the
 agent that didn't propose the trade catches two failure modes:
 
 1. **Stale rule application.** The Trader was last told `mode` was `paper`; the user changed it
-   in `config/config.toml` an hour ago. The Reviewer reads the file fresh.
+   in `config.toml` an hour ago. The Reviewer reads the file fresh.
 2. **Bias under conviction.** Enthusiasm makes the Trader rationalize bending the rules. The
    Reviewer's prompt forces adversarial rule-checking.
 
@@ -27,7 +27,7 @@ Trader (main session, CLAUDE.md)
    │ composes the pre-trade review block for the user-directed trade
    ├─► writes proposals/{intent_id}.json
    ├─► spawns risk-reviewer subagent with the proposal
-   │     Reviewer reads: config/config.toml, strategy.md,
+   │     Reviewer reads: config.toml, strategy.md,
    │       data/trade-log.jsonl, KILL_SWITCH, journal/today.md
    │     Reviewer returns: {decision: approve|reject, reasons: [...]}
    ├─► writes reviews/{intent_id}.json
@@ -89,7 +89,7 @@ On reject, the Trader still writes one line to `data/trade-log.jsonl`:
 
 ## 6. When to require review
 
-In `config/config.toml`:
+In `config.toml`:
 
 ```toml
 require_risk_review = true   # default true
@@ -105,13 +105,13 @@ require_risk_review = true   # default true
 
 ```
 You are the risk-reviewer subagent. Review the following trade proposal against
-references/strategy.md §0, config/config.toml, and data/trade-log.jsonl. Return a single JSON
+references/strategy.md §0, config.toml, and data/trade-log.jsonl. Return a single JSON
 decision object per .claude/agents/risk-reviewer.md.
 
 Proposal:
 {INLINE_PROPOSAL_JSON or path to proposals/{intent_id}.json}
 
-Read config/config.toml, references/strategy.md, data/trade-log.jsonl, and check for KILL_SWITCH.
+Read config.toml, references/strategy.md, data/trade-log.jsonl, and check for KILL_SWITCH.
 Use the checklist in your system prompt. No prose, JSON only.
 ```
 

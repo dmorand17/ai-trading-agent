@@ -41,14 +41,14 @@ Full mechanics in `references/strategy.md` §0.
 2. **Account is the dedicated Agentic account** — not the user's primary individual account.
    Robinhood only permits agentic trading from dedicated Agentic accounts.
 3. **Market session available.** If fully closed, scans continue but no order tool may fire.
-4. **`config/config.toml` exists and parses.** Required: `mode`, `require_risk_review`. If
+4. **`config.toml` exists and parses.** Required: `mode`, `require_risk_review`. If
    missing, create with paper defaults and tell the user. **In live mode, `require_risk_review`
    must be `true`** — the risk-reviewer is the pre-trade gate. If `mode = "live"` and
    `require_risk_review = false`, halt and tell the user.
 5. **SOP universe resolves (cache-first, never a halt).** Resolve the watchlist from
    `data/watchlist.json` per the `strategy.md` §2 refresh policy: read the cache by default;
-   refresh from the MCP only on user request or when the cache is missing / >14 days old; on a
-   failed refresh, fall back to the cache and continue. The watchlist is a tracked/research list,
+   refresh from the MCP only on user request, when the cache is missing, or on the weekly
+   `portfolio-review`; on a failed refresh, fall back to the cache and continue. The watchlist is a tracked/research list,
    not a trade gate — never halt on it.
 6. **No kill switch.** If `KILL_SWITCH` exists at repo root, refuse to place orders (scans still
    allowed).
@@ -65,9 +65,8 @@ Full mechanics in `references/strategy.md` §0.
 4. If require_risk_review = true: write proposals/{intent_id}.json + spawn the risk-reviewer
    subagent (references/risk-review.md). Proceed on "approve"; on "reject" in the autonomous
    loop, log and skip — in stock-trader, surface it and let the user decide.
-5. Write the pending data/trade-log.jsonl line BEFORE any MCP order tool (strategy.md §4, §5).
-6. Execute by mode: paper → result "paper", no MCP call. live → place the order, then log the
-   result.
+5. Execute by mode: paper → log result "paper", no MCP call. live → place the order, then
+   immediately log the result to data/trade-log.jsonl (strategy.md §4, §5).
 7. On a buy fill, record/refresh the position in data/positions.jsonl (total qty + current P&L).
 8. Update journal/{YYYY-MM-DD}.md.
 ```
@@ -85,8 +84,8 @@ Do not preload references unless the loop needs them.
 ## Two logs + position state, all local
 
 - **`data/trade-log.jsonl`** (gitignored, append-only, machine-readable) — one line per order
-  state transition, written **before** the MCP order tool fires. The analytics source. Schema in
-  `strategy.md` §5.1.
+  state transition, written immediately after the MCP order tool returns. The analytics source.
+  Schema in `strategy.md` §5.1.
 - **`data/positions.jsonl`** (gitignored, append-only) — total quantity + current P&L per open
   position. Schema in `strategy.md` §5.3.
 - **`journal/{YYYY-MM-DD}.md`** (human-readable, one per day) — Portfolio Status → Market
@@ -102,7 +101,7 @@ Do not preload references unless the loop needs them.
 ## Stop conditions
 
 Halt and tell the user when: the market is fully closed and an order was requested; the MCP goes
-unreachable mid-loop; `KILL_SWITCH` appears; or `config/config.toml` becomes unparseable. (A
+unreachable mid-loop; `KILL_SWITCH` appears; or `config.toml` becomes unparseable. (A
 failed watchlist refresh is **not** a halt — fall back to the `data/watchlist.json` cache, §2.)
 
 ## Reporting back
@@ -110,7 +109,9 @@ failed watchlist refresh is **not** a halt — fall back to the `data/watchlist.
 After each loop, summarize in ≤5 lines: trades placed (count + mode) · positions touched · stop
 conditions hit · paths to `data/trade-log.jsonl` and today's `journal/{YYYY-MM-DD}.md`.
 
-## Git practices (inherited)
+## Notifications
 
-- Use `git-c` instead of `git` when pushing to a remote. If `git-c` fails with a "failed to
-  connect to the docker API" error, ask the user whether to start colima via `colima start`.
+Push notifications go via `scripts/notify.sh`. `NTFY_TOKEN`.  If `NTFY_TOKEN` is missing source the .env file
+
+If `.env` is missing or the token is still unset after sourcing, emit the notification as the
+final session line instead of failing silently.

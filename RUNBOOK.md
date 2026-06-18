@@ -15,7 +15,7 @@ through the audit gates, and review.
 |---|---|---|
 | Before the open / any market brief | Research & context | `/market-research` |
 | Any time the market is open/extended | Trade execution (single or planned set) | `/stock-trader` |
-| Monthly / on-demand | Book health & lessons | `/portfolio-review` |
+| Weekly (Fri) / on-demand | Book health & lessons | `/portfolio-review` |
 
 The most common entry point is `/stock-trader` for a single trade. The other phases are optional
 structure around it.
@@ -65,7 +65,7 @@ to trade.
 
 ## Portfolio review (`/portfolio-review`)
 
-**When:** On-demand ("how's the book?") or monthly. Read-only — never places orders or edits
+**When:** Weekly (Friday after the close) or on-demand ("how's the book?"). Read-only — never places orders or edits
 prior logs.
 
 **What it does:** Snapshots current holdings + unrealized P&L, computes account total return vs
@@ -85,7 +85,7 @@ dated entry to the living ledger `journal/portfolio-review.md`.
 | `journal/portfolio-review.md` | portfolio-review | Single living ledger, newest entry first |
 | `data/trade-log.jsonl` | stock-trader | Append-only; the single analytics source. Gitignored. |
 | `data/positions.jsonl` | stock-trader, portfolio-review | Open-position state (total qty + P&L). Gitignored. |
-| `config/config.toml` | You (edit manually) | `mode`, `require_risk_review`, `sop_universe_list_name` |
+| `config.toml` | You (edit manually) | `mode`, `require_risk_review`, `sop_universe_list_name` |
 | `KILL_SWITCH` | You (create/delete manually) | Presence halts all new orders; delete to re-enable |
 
 ---
@@ -97,6 +97,6 @@ Any of these halts the current phase and reports to you:
 - Market is fully closed and an order was requested (research/journal still run)
 - MCP unreachable mid-loop
 - KILL_SWITCH file present at repo root
-- `config/config.toml` missing or unparseable
+- `config.toml` missing or unparseable
 - Agent WatchList not found on Robinhood
 - `data/trade-log.jsonl` unwritable

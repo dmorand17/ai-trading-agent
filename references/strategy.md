@@ -2,7 +2,7 @@
 
 The single authoritative reference for **how trades are placed, how positions are tracked, and
 the mandatory log schemas.** This is a for-fun project running manually for now — the rules are
-deliberately light. `config/config.toml` is the runtime source of truth for execution mode and
+deliberately light. `config.toml` is the runtime source of truth for execution mode and
 the universe-list pointer; the trading universe itself lives on Robinhood (pulled via the MCP).
 
 This phase is **manual / human-in-the-loop**. The autonomous daily loop and a programmatic
@@ -27,6 +27,8 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
   market order.
 - The ~2% figure is a starting recommendation, not a hard rule. The user may accept, tighten,
   or widen it per trade.
+- **Default `time_in_force`:** `gtc` (good till cancelled) for limit orders; `gfd` (good for
+  day) for market orders. The user may override per trade.
 
 ### 0.2 Extended-hours trading is allowed
 
@@ -47,10 +49,10 @@ If anything below conflicts with §0, **§0 wins**. Bright-line invariants.
 
 ## 1. Mode handling (paper / live)
 
-The SOP reads `config/config.toml` **on every invocation, before any order tool is touched.**
+The SOP reads `config.toml` **on every invocation, before any order tool is touched.**
 If the file is missing, create it with paper defaults and report to the user.
 
-### 1.1 `config/config.toml` schema
+### 1.1 `config.toml` schema
 
 ```toml
 mode = "paper"                              # "paper" | "live"
@@ -79,7 +81,7 @@ user-confirmed **Agentic** account (never the primary individual account); no `K
 ## 2. Universe (a tracked/research list, cached locally — not a trade gate)
 
 The universe is the Robinhood watchlist whose `display_name` equals
-`config/config.toml::sop_universe_list_name`. It is a **tracked list and research seed**, cached
+`config.toml::sop_universe_list_name`. It is a **tracked list and research seed**, cached
 locally to `data/watchlist.json` (§5.4). **It does not gate trades** — the `stock-trader` skill
 may trade any ticker, on the list or not.
 
@@ -87,10 +89,10 @@ may trade any ticker, on the list or not.
 
 - **Read the cache by default.** Resolve the universe from `data/watchlist.json`; make **no** MCP
   watchlist call on a normal run.
-- **Refresh from the MCP only when** (a) the user explicitly asks to refresh, **or** (b) the cache
-  is missing or its `fetched_at_utc` is **older than 14 days**. To refresh: `get_watchlists`
-  (match by name → `list_id`) → `get_watchlist_items`, **filter to equity** (drop items whose
-  `object_type ≠ "instrument"` — crypto pairs, indexes, futures), then rewrite
+- **Refresh from the MCP only when** (a) the user explicitly asks to refresh, (b) the cache is
+  missing, or (c) the weekly `portfolio-review` runs (the standing refresh point). To refresh:
+  `get_watchlists` (match by name → `list_id`) → `get_watchlist_items`, **filter to equity** (drop
+  items whose `object_type ≠ "instrument"` — crypto pairs, indexes, futures), then rewrite
   `data/watchlist.json` with a fresh `fetched_at_utc`.
 - **On a failed refresh:** fall back to the existing cache, note staleness, and continue — do not
   halt. (Compare `fetched_at_utc` to the current date the session already knows; no clock call.)
@@ -131,15 +133,12 @@ For each trade the user directs:
    `reject` in the autonomous loop, skip and log `result: "rejected_by_risk_review"`. In
    `stock-trader` (human-in-the-loop), surface the rejection and let the user decide. See
    `references/risk-review.md`.
-3. **Append a pending entry to `data/trade-log.jsonl`** (§5) with `result: "pending"`.
-4. If `mode = "paper"`: re-append a line with the same `intent_id` and `result: "paper"`.
-5. If `mode = "live"`: invoke the Robinhood MCP order tool; append a closing entry with
-   `result: "submitted"`/`"filled"`/`"rejected"`/`"error"` and the `mcp_response`.
-6. Update `journal/{YYYY-MM-DD}.md` either way.
-7. On a buy fill, record/refresh the position in `data/positions.jsonl` (§5.3).
-
-**The trade-log line must be written before the MCP order tool is invoked.** This is the SOP's
-core auditability guarantee.
+3. If `mode = "paper"`: append a line to `data/trade-log.jsonl` with `result: "paper"`. No MCP call.
+4. If `mode = "live"`: invoke the Robinhood MCP order tool; **then** append a single entry to
+   `data/trade-log.jsonl` with `result: "submitted"`/`"filled"`/`"rejected"`/`"error"` and the
+   `mcp_response`.
+5. Update `journal/{YYYY-MM-DD}.md` either way.
+6. On a buy fill, record/refresh the position in `data/positions.jsonl` (§5.3).
 
 ---
 
@@ -147,7 +146,7 @@ core auditability guarantee.
 
 ### 5.1 `data/trade-log.jsonl` (append-only, machine-readable, single analytics source)
 
-One JSON object per line. Written **before** the MCP order tool fires. Gitignored — kept local.
+One JSON object per line. Written immediately after the MCP order tool returns (or immediately for paper/rejected entries). Gitignored — kept local.
 
 ```json
 {
@@ -183,7 +182,7 @@ One JSON object per line. Written **before** the MCP order tool fires. Gitignore
 | `account_id_masked` | yes | Last 4 chars of the Agentic account id. Never log the full id. |
 | `mcp_tool_called` | live only | Robinhood tool invoked. |
 | `mcp_response` | live only | Full structured response incl. broker order id. |
-| `result` | yes | `"pending"`, `"paper"`, `"submitted"`, `"filled"`, `"rejected"`, `"rejected_by_risk_review"`, `"error"`. |
+| `result` | yes | `"paper"`, `"submitted"`, `"filled"`, `"rejected"`, `"rejected_by_risk_review"`, `"error"`. |
 | `rejection_reasons` | when rejected by review | Array of strings copied verbatim from the Reviewer. |
 | `error_msg` | optional | Set on `rejected`/`error`. |
 | `rules_version` | yes | Date of this file that produced the decision. |
@@ -192,7 +191,7 @@ One JSON object per line. Written **before** the MCP order tool fires. Gitignore
 `realized_return_pct`, `holding_period_days`.
 
 **Append-only:** never overwrite; re-append a line with the same `intent_id` per state
-transition (`pending → submitted → filled`). Reconstruct state by taking the latest line per
+transition (e.g. `submitted → filled`). Reconstruct state by taking the latest line per
 `intent_id`.
 
 Quick recipes:
@@ -289,8 +288,8 @@ overwritten on each refresh. The cache is the default source; refresh policy is 
 
 | Field | Notes |
 | --- | --- |
-| `list_name` | The `display_name` matched against `config/config.toml::sop_universe_list_name`. |
-| `fetched_at_utc` | ISO 8601, UTC. Drives the 14-day staleness check (§2). |
+| `list_name` | The `display_name` matched against `config.toml::sop_universe_list_name`. |
+| `fetched_at_utc` | ISO 8601, UTC. Timestamp of the last refresh (§2). |
 | `symbols` | Uppercase equity tickers (post equity-filter). |
 
 Written by `market-research` on a refresh, and by `stock-trader` (local append + `fetched_at_utc`
@@ -307,7 +306,7 @@ journal entries still run. Delete the file to re-enable; log the event.
 
 ## 7. Stop conditions (SOP-level halts)
 
-Halt and report to the user when: `config/config.toml` is missing or unparseable; Robinhood MCP
+Halt and report to the user when: `config.toml` is missing or unparseable; Robinhood MCP
 `tools/list` fails twice in a row;
 the connected account is not the Agentic account; `data/trade-log.jsonl` is unwritable; the
 market is fully closed (no session available) and an order was requested.

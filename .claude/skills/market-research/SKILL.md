@@ -16,11 +16,12 @@ any time you want a market brief.
 ## Do this
 
 1. **Check the account & resolve the universe** (`CLAUDE.md` preconditions). Confirm
-   `config/config.toml` parses and there's no `KILL_SWITCH`. Resolve the SOP universe per the
+   `config.toml` parses and there's no `KILL_SWITCH`. Resolve the SOP universe per the
    **`strategy.md` §2 refresh policy**: read the cache `data/watchlist.json` by default; refresh
    from the MCP (`get_watchlists` → `get_watchlist_items`, equity-filter, rewrite the cache) only
-   if the user asked to refresh or the cache is missing / older than 14 days. On a failed
-   refresh, fall back to the cache. Read the **Robinhood balance and open positions** from the
+   if the user asked to refresh or the cache is missing (the weekly `portfolio-review` is the
+   standing refresh point). On a failed refresh, fall back to the cache. Read the **Robinhood
+   balance and open positions** from the
    MCP: cash, total equity, every open position (ticker, qty, avg entry, current mark, unrealized
    P&L). If the MCP is unreachable, note it and continue with research only (use the cached
    universe).
@@ -50,9 +51,7 @@ any time you want a market brief.
 "Urgent" = a catalyst materially affecting a held position, or a live stop condition (`CLAUDE.md`).
 Otherwise stay silent.
 
-When urgent, send one notification via `scripts/notify.sh`. The script reads `NTFY_TOKEN` from
-the environment (or `.env`; source it first with `set -a; . ./.env; set +a` if the file exists).
-If `NTFY_TOKEN` is unset, emit the message as the final session line instead.
+When urgent, send one notification via `scripts/notify.sh`. 
 
 ```bash
 ./scripts/notify.sh -t "market-research" -p 4 -T "chart_increasing" "<message>"

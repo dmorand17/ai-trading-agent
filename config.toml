@@ -9,9 +9,9 @@ mode = "live"
 
 # Name (display_name) of the Robinhood watchlist the SOP uses as its universe. The list is a
 # tracked/research list (not a trade gate) and is cached locally to data/watchlist.json. The SOP
-# reads the cache by default and only refreshes from Robinhood on request or when the cache is
-# >14 days old (refresh policy: references/strategy.md §2). Edit the list in the Robinhood app,
-# then ask the SOP to refresh. Rename here if you rename the list there.
+# reads the cache by default and refreshes from Robinhood on request, when the cache is missing,
+# or on the weekly portfolio-review (refresh policy: references/strategy.md §2). Edit the list in
+# the Robinhood app, then ask the SOP to refresh. Rename here if you rename the list there.
 sop_universe_list_name = "Agent WatchList"
 
 # Two-agent risk review (references/risk-review.md, .claude/agents/risk-reviewer.md).

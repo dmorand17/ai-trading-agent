@@ -58,7 +58,7 @@ The guiding style is Peter Lynch's:
 
 ## Configuration
 
-### `config/config.toml`
+### `config.toml`
 
 ```toml
 mode = "paper"                              # "paper" | "live"
@@ -80,7 +80,7 @@ push-notification token) go here. See `.env.example`.
 2. **Robinhood MCP connector installed** in Claude Code:
    - Endpoint: `https://agent.robinhood.com/mcp/trading`
    - Transport: HTTP — install via Claude Code's connectors UI or `~/.claude/.mcp.json`.
-3. **`config/config.toml`** present and valid (create from the schema above).
+3. **`config.toml`** present and valid (create from the schema above).
 4. **Agent WatchList** created on Robinhood (display name must match `sop_universe_list_name`).
 
 ## Running the SOP interactively
@@ -104,7 +104,7 @@ phase skills (below) cover research, execution, and review.
 | --- | --- |
 | `stock-trader` | Trade execution — single user-directed trade or a planned set, through the audit gates (the primary entry point) |
 | `market-research` | Research & context — balance, catalysts, watchlist notes (no orders) |
-| `portfolio-review` | Book snapshot + total return vs SPY + lessons (on-demand/monthly) |
+| `portfolio-review` | Book snapshot + total return vs SPY + lessons (weekly/on-demand) |
 
 Invoke any by name (`/stock-trader`, `/market-research`, …) or let them auto-activate from the prompts
 in their descriptions. See `RUNBOOK.md` for the day-to-day flow.
@@ -142,7 +142,7 @@ See `references/strategy.md` §5.1 for the full schema.
 
 ## Stopping the SOP
 
-- **Return to paper (no real orders):** set `mode = "paper"` in `config/config.toml`.
+- **Return to paper (no real orders):** set `mode = "paper"` in `config.toml`.
 - **Halt all new orders:** create an empty `KILL_SWITCH` file at repo root.
 
 ## Roadmap

@@ -22,8 +22,8 @@ Two modes, same gates:
   sells `bid × 0.98`). Market only when a limit can't fill the intent or the user asks for one.
 - **Extended hours allowed** (§0.2) — confirm the session and pass the matching `market_hours`.
   Halt only if the market is fully closed.
-- **Proposal → risk-review → pending `data/trade-log.jsonl` line, written BEFORE any MCP order
-  tool** (§4, §5). No order tool fires without these.
+- **Proposal → risk-review → MCP order tool → log result to `data/trade-log.jsonl`** (§4, §5).
+  No order tool fires without the proposal and risk-review steps.
 - **Journal entry** for the day (§0.3), including the End-of-Day Reflection.
 
 ## Do this (per trade)
@@ -51,7 +51,7 @@ until the user confirms.
 ### 2. Hard preconditions (`CLAUDE.md`) — halt on failure
 
 MCP connected (`tools/list` shows Robinhood order tools) · account is the **Agentic** account ·
-market session available (§0.2 — if fully closed, stop and tell the user) · `config/config.toml`
+market session available (§0.2 — if fully closed, stop and tell the user) · `config.toml`
 parses · no `KILL_SWITCH` · `data/trade-log.jsonl` writable. On any failure, stop with a written
 reason. (The watchlist is a tracked list, not a precondition — `strategy.md` §2.)
 
@@ -100,18 +100,17 @@ decision.
   `"override_risk_review": true` and `"override_reasons": [<the reviewer's reasons>]`; journal
   Trades-Executed reasoning notes "user override of risk-review reject: <reasons>".
 
-### 6. Write the pending trade-log line, then place the order
+### 6. Place the order, then log the result
 
-1. **Append the `pending` `data/trade-log.jsonl` line BEFORE any MCP order tool** (§4, §5.1). Set
-   `order_type`; `dollar_amount` vs `limit_price` per order type; `side` = buy/sell.
-2. Execute by `config/config.toml::mode`:
-   - **paper** → re-append a line with `result: "paper"`. No MCP call.
+1. Execute by `config.toml::mode`:
+   - **paper** → append a line to `data/trade-log.jsonl` with `result: "paper"`. No MCP call.
    - **live** → `review_equity_order` first (unless the user explicitly said "skip review"), then
-     `place_equity_order`. Re-append a closing line with `result:
-     "submitted"`/`"filled"`/`"rejected"`/`"error"` and the full `mcp_response`.
-   - **Order params by type:** limit → `type=limit`, `limit_price`, `time_in_force=gfd`, the
+     `place_equity_order`. Immediately append a single line to `data/trade-log.jsonl` with
+     `result: "submitted"`/`"filled"`/`"rejected"`/`"error"` and the full `mcp_response`.
+   Set `order_type`; `dollar_amount` vs `limit_price` per order type; `side` = buy/sell.
+   - **Order params by type:** limit → `type=limit`, `limit_price`, `time_in_force=gtc`, the
      session-appropriate `market_hours`. market → `type=market` with `quantity` (whole shares) or
-     `dollar_amount` (fractional), session-appropriate `market_hours`.
+     `dollar_amount` (fractional), `time_in_force=gfd`, session-appropriate `market_hours`.
 3. **Update `data/positions.jsonl`** (§5.3): on a buy fill, recompute `total_qty` +
    `avg_entry_price` and append a new line. On a sell, reduce `total_qty` (or `0` if fully
    closed) and add the §5.1 sell-only analytics fields to the trade-log line (`entry_intent_id`,
@@ -130,8 +129,7 @@ the `portfolio-review` skill, not here.)
 
 ## Notification
 
-Send one notification when an order is placed (paper or live) via `scripts/notify.sh` (read
-`.env` for `NTFY_TOKEN`; if missing, emit the summary as the final session line).
+Send one notification when an order is placed (paper or live) via `scripts/notify.sh` 
 
 ```bash
 ./scripts/notify.sh -t "stock-trader" -p 3 -T "moneybag" "Bought 10 NVDA @ $847.50 [live, user-directed]"
