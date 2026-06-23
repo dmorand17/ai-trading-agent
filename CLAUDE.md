@@ -109,6 +109,14 @@ failed watchlist refresh is **not** a halt — fall back to the `data/watchlist.
 After each loop, summarize in ≤5 lines: trades placed (count + mode) · positions touched · stop
 conditions hit · paths to `data/trade-log.jsonl` and today's `journal/{YYYY-MM-DD}.md`.
 
+## UUID generation
+
+Use `scripts/uuid.sh` to generate UUIDs (intent IDs, ref IDs). Do not use `python3 -c "import uuid; ..."` or other ad-hoc methods.
+
+```bash
+bash scripts/uuid.sh
+```
+
 ## Notifications
 
 Push notifications go via `scripts/notify.sh`. `NTFY_TOKEN`.  If `NTFY_TOKEN` is missing source the .env file
